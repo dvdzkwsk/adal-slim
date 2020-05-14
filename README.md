@@ -1,28 +1,26 @@
 ---
-
 This library, ADAL for JavaScript, will no longer receive new feature improvements. Instead, use the new library
 [MSAL.js](https://github.com/AzureAD/microsoft-authentication-library-for-js).
 
 * If you are starting a new project, you can get started with the
-  [MSAL.js docs](https://github.com/AzureAD/microsoft-authentication-library-for-js/wiki)
-  for details about the scenarios, usage, and relevant concepts.
+[MSAL.js docs](https://github.com/AzureAD/microsoft-authentication-library-for-js/wiki)
+for details about the scenarios, usage, and relevant concepts.
 * If your application is using the previous ADAL JavaScript library, you can follow this
-  [migration guide](https://docs.microsoft.com/azure/active-directory/develop/msal-compare-msal-js-and-adal-js)
-  to update to MSAL.js.
+[migration guide](https://docs.microsoft.com/azure/active-directory/develop/msal-compare-msal-js-and-adal-js)
+to update to MSAL.js.
 * Existing applications relying on ADAL JavaScript will continue to work.
-
 ---
 
-Active Directory Authentication Library (ADAL) for JavaScript
-====================================
-|[Getting Started](https://github.com/AzureAD/azure-activedirectory-library-for-js/wiki)| [Docs](https://aka.ms/aaddev)| [Samples](https://github.com/AzureAD/azure-activedirectory-library-for-js/wiki/Code-samples)| [Support](README.md#community-help-and-support)
-| --- | --- | --- | --- |
+# Active Directory Authentication Library (ADAL) for JavaScript
+
+| [Getting Started](https://github.com/AzureAD/azure-activedirectory-library-for-js/wiki) | [Docs](https://aka.ms/aaddev) | [Samples](https://github.com/AzureAD/azure-activedirectory-library-for-js/wiki/Code-samples) | [Support](README.md#community-help-and-support) |
+| --------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+
 
 Active Directory Authentication Library for JavaScript (ADAL JS) helps you to use Azure AD for handling authentication in your single page applications.
 This library works with both plain JS as well as AngularJS applications.
 
 [![Build Status](https://travis-ci.org/AzureAD/azure-activedirectory-library-for-js.svg?branch=dev)](https://travis-ci.org/AzureAD/azure-activedirectory-library-for-js)[![npm](https://img.shields.io/npm/v/adal-angular.svg)](https://www.npmjs.com/package/adal-angular)[![npm](https://img.shields.io/npm/dm/adal-angular.svg)](https://www.npmjs.com/package/adal-angular)
-
 
 ## Installation
 
@@ -32,7 +30,7 @@ Via NPM (https://www.npmjs.com/package/adal-angular):
 
     npm install adal-angular
 
-*Note:* Currently there is one NPM package providing both the plain JS library (adal.js) and the AngularJS wrapper (adal-angular.js).
+_Note:_ Currently there is one NPM package providing both the plain JS library (adal.js) and the AngularJS wrapper (adal-angular.js).
 
 Via CDN:
 
@@ -91,26 +89,26 @@ Next, you can get access tokens for the APIs your app needs to call using the ac
 
 If the silent token acquisition fails for some reasons such as an expired session or password change, you will need to invoke one of the interactive methods to acquire tokens.
 
- ```JavaScript
- authenticationContext.acquireToken(webApiConfig.resourceId, function (errorDesc, token, error) {
-     if (error) { //acquire token failure
-         if (config.popUp) {
-             // If using popup flows
-             authenticationContext.acquireTokenPopup(webApiConfig.resourceId, null, null,  function (errorDesc, token, error) {});
-         }
-         else {
-         // In this case the callback passed in the Authentication request constructor will be called.
-             authenticationContext.acquireTokenRedirect(webApiConfig.resourceId, null, null);
-         }
-     }
-     else {
-         //acquired token successfully
-     }
- });
+```JavaScript
+authenticationContext.acquireToken(webApiConfig.resourceId, function (errorDesc, token, error) {
+    if (error) { //acquire token failure
+        if (config.popUp) {
+            // If using popup flows
+            authenticationContext.acquireTokenPopup(webApiConfig.resourceId, null, null,  function (errorDesc, token, error) {});
+        }
+        else {
+        // In this case the callback passed in the Authentication request constructor will be called.
+            authenticationContext.acquireTokenRedirect(webApiConfig.resourceId, null, null);
+        }
+    }
+    else {
+        //acquired token successfully
+    }
+});
 }
 ```
 
-**Note:** In ADAL JS, you will have to explicitly call the handleWindowCallback method on page load to handle the response from the server in case of redirect flows like login without popup and acquireTokenRedirect. There is no need to call this function for popup flows like loginPopup and acquireTokenPopup.  This method must be called for processing the response received from AAD. It extracts the hash, processes the token or error, saves it in the cache and calls the registered callback function in your initialization with the result.   
+**Note:** In ADAL JS, you will have to explicitly call the handleWindowCallback method on page load to handle the response from the server in case of redirect flows like login without popup and acquireTokenRedirect. There is no need to call this function for popup flows like loginPopup and acquireTokenPopup. This method must be called for processing the response received from AAD. It extracts the hash, processes the token or error, saves it in the cache and calls the registered callback function in your initialization with the result.
 
 ```JavaScript
 if (authenticationContext.isCallback(window.location.hash)) {
@@ -165,7 +163,8 @@ We recommend you use the "adal" tag so we can see it! Here is the latest Q&A on 
 If you find a security issue with our libraries or services please report it to [secure@microsoft.com](mailto:secure@microsoft.com) with as much detail as possible. Your submission may be eligible for a bounty through the [Microsoft Bounty](http://aka.ms/bugbounty) program. Please do not post security issues to GitHub Issues or any other public site. We will contact you shortly upon receiving the information. We encourage you to get notifications of when security incidents occur by visiting [this page](https://technet.microsoft.com/en-us/security/dd252948) and subscribing to Security Advisory Alerts.
 
 ## License
-Copyright (c) Microsoft Corporation.  All rights reserved. Licensed under the Apache License, Version 2.0 (the "License");
+
+Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the Apache License, Version 2.0 (the "License");
 
 ## We value and adhere to the Microsoft Open Source Code of Conduct
 
