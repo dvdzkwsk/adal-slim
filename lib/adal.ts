@@ -147,7 +147,7 @@ export class Adal {
         saveItem(StorageKey.ERROR, "")
         saveItem(StorageKey.ERROR_DESCRIPTION, "")
         var urlNavigate =
-            this._getNavigateUrl("id_token", null) +
+            this._getNavigateUrl("id_token") +
             "&nonce=" +
             encodeURIComponent(this._idTokenNonce)
 
@@ -443,7 +443,7 @@ export class Adal {
      * Acquires access token with hidden iframe
      * @ignore
      */
-    _renewToken(resource, callback, responseType) {
+    _renewToken(resource, callback, responseType = "token") {
         // use iframe to try to renew token
         // use given resource to create new authz url
         this.info("renewToken is called for resource:" + resource)
@@ -454,7 +454,6 @@ export class Adal {
         this._renewStates.push(expectedState)
         this.verbose("Renew token Expected state: " + expectedState)
         // remove the existing prompt=... query parameter and add prompt=none
-        responseType = responseType || "token"
         var urlNavigate = this._urlRemoveQueryStringParameter(
             this._getNavigateUrl(responseType, resource),
             "prompt",
@@ -483,11 +482,11 @@ export class Adal {
      * Renews idtoken for app's own backend when resource is clientId and calls the callback with token/error
      * @ignore
      */
-    _renewIdToken(callback, responseType) {
+    _renewIdToken(callback, responseType?: string) {
         // use iframe to try to renew token
         this.info("renewIdToken is called")
-        var frameHandle = this._addAdalFrame("adalIdTokenFrame")
-        var expectedState = this._guid() + "|" + this.config.clientId
+        let frameHandle = this._addAdalFrame("adalIdTokenFrame")
+        let expectedState = this._guid() + "|" + this.config.clientId
         this._idTokenNonce = this._guid()
         saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
         this.config.state = expectedState
@@ -495,12 +494,9 @@ export class Adal {
         this._renewStates.push(expectedState)
         this.verbose("Renew Idtoken Expected state: " + expectedState)
         // remove the existing prompt=... query parameter and add prompt=none
-        var resource =
-            responseType === null || typeof responseType === "undefined"
-                ? null
-                : this.config.clientId
-        var responseType = responseType || "id_token"
-        var urlNavigate = this._urlRemoveQueryStringParameter(
+        let resource = responseType || this.config.clientId
+        responseType = responseType || "id_token"
+        let urlNavigate = this._urlRemoveQueryStringParameter(
             this._getNavigateUrl(responseType, resource),
             "prompt",
         )
@@ -989,29 +985,19 @@ export class Adal {
      * @ignore
      */
     _createUser(idToken) {
-        var user = null
-        var parsedJson = this._extractIdToken(idToken)
-        if (parsedJson && parsedJson.hasOwnProperty("aud")) {
-            if (
-                parsedJson.aud.toLowerCase() ===
-                this.config.clientId.toLowerCase()
-            ) {
-                user = {
-                    userName: "",
-                    profile: parsedJson,
-                }
-
-                if (parsedJson.hasOwnProperty("upn")) {
-                    user.userName = parsedJson.upn
-                } else if (parsedJson.hasOwnProperty("email")) {
-                    user.userName = parsedJson.email
-                }
-            } else {
-                this.warn("IdToken has invalid aud field")
-            }
+        const json = this._extractIdToken(idToken)
+        if (!has(json, "aud")) {
+            return
         }
 
-        return user
+        if (json.aud.toLowerCase() !== this.config.clientId.toLowerCase()) {
+            this.warn("IdToken has invalid aud field")
+        } else {
+            return {
+                userName: json.upn || json.email,
+                profile: json,
+            }
+        }
     }
 
     /**
@@ -1037,8 +1023,8 @@ export class Adal {
      * @returns {RequestInfo} an object created from the redirect response from AAD comprising of the keys - parameters, requestType, stateMatch, stateResponse and valid.
      */
     getRequestInfo(hash) {
-        var parameters = deserialize(getHash(hash))
-        var requestInfo = {
+        const parameters = deserialize(getHash(hash)) as any
+        const requestInfo = {
             valid: false,
             parameters: {},
             stateMatch: false,
@@ -1056,16 +1042,13 @@ export class Adal {
                 requestInfo.valid = true
 
                 // which call
-                var stateResponse = ""
                 if (parameters.hasOwnProperty("state")) {
                     this.verbose("State: " + parameters.state)
-                    stateResponse = parameters.state
+                    requestInfo.stateResponse = parameters.state
                 } else {
                     this.warn("No state returned")
                     return requestInfo
                 }
-
-                requestInfo.stateResponse = stateResponse
 
                 // async calls can fire iframe and login request at the same time if developer does not use the API as expected
                 // incoming callback needs to be looked up to find the request type
@@ -1287,7 +1270,7 @@ export class Adal {
             }
         }
 
-        saveItem(StorageKey.RENEW_STATUS + resource, TokenRenewStatus.COMPLETED)
+        saveItem(StorageKey.RENEW_STATUS + resource, TokenRenewStatus.Completed)
     }
 
     /**
@@ -1379,10 +1362,8 @@ export class Adal {
                 self = window.parent._adalInstance
             }
 
-            var requestInfo = self.getRequestInfo(hash)
-            var token,
-                tokenReceivedCallback,
-                tokenType = null
+            let requestInfo = self.getRequestInfo(hash)
+            let tokenReceivedCallback: any
 
             if (isPopup || window.parent !== window) {
                 tokenReceivedCallback =
@@ -1394,6 +1375,8 @@ export class Adal {
             self.info("Returned from redirect url")
             self.saveTokenFromHash(requestInfo)
 
+            let token: any
+            let tokenType: any
             if (
                 requestInfo.requestType === RequestType.RENEW_TOKEN &&
                 window.parent
@@ -1429,10 +1412,10 @@ export class Adal {
 
             if (window.parent === window && !isPopup) {
                 if (self.config.navigateToLoginRequestUrl) {
-                    window.location.href = self._getItem(
-                        StorageKey.LOGIN_REQUEST,
-                    )
-                } else window.location.hash = ""
+                    window.location.href = getItem(StorageKey.LOGIN_REQUEST)
+                } else {
+                    window.location.hash = ""
+                }
             }
         }
     }
@@ -1441,7 +1424,7 @@ export class Adal {
      * Constructs the authorization endpoint URL and returns it.
      * @ignore
      */
-    _getNavigateUrl(responseType: string, resource?: string | null) {
+    _getNavigateUrl(responseType: string, resource?: string) {
         var tenant = "common"
         if (this.config.tenant) {
             tenant = this.config.tenant
@@ -1770,9 +1753,8 @@ export class Adal {
                     .getElementsByTagName("body")[0]
                     .appendChild(ifr)
             } else if (document.body && document.body.insertAdjacentHTML) {
-                // @ts-ignore
                 document.body.insertAdjacentHTML(
-                    "beforeEnd",
+                    "beforeEnd" as any,
                     '<iframe name="' +
                         iframeId +
                         '" id="' +
@@ -1815,7 +1797,7 @@ export class Adal {
     log(
         level: LogLevel,
         message: string,
-        error: Error | string | null,
+        error: Error | string | undefined | null,
         containsPii = false,
     ) {
         if (!this.piiLoggingEnabled && containsPii) return
@@ -1859,7 +1841,7 @@ export class Adal {
      * @param {string} message  -  Message to log.
      * @param {string} error  -  Error to log.
      */
-    error(message: string, error: Error) {
+    error(message: string, error?: Error) {
         this.log(LogLevel.Error, message, error)
     }
 
@@ -2010,7 +1992,7 @@ function isEmpty(str: string): boolean {
 }
 
 function has(obj: any, key: string): boolean {
-    return Object.hasOwnProperty.call(obj, key)
+    return !!obj && Object.hasOwnProperty.call(obj, key)
 }
 
 function detectStorage(): {
@@ -2038,5 +2020,5 @@ function detectStorage(): {
 }
 
 function now() {
-	return Math.round(Date.now() / 1000)
+    return Math.round(Date.now() / 1000)
 }
