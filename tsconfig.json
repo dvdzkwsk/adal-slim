@@ -1,0 +1,16 @@
+{
+    "include": ["lib"],
+    "compilerOptions": {
+        "target": "esnext",
+        "module": "esnext",
+        "moduleResolution": "node",
+        "lib": ["es2015", "dom"],
+        "sourceMap": true,
+        "noEmit": true,
+        "strictNullChecks": true,
+        "strictPropertyInitialization": false,
+        "skipLibCheck": true,
+        "importHelpers": true,
+        "noEmitHelpers": true
+    }
+}
