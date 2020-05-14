@@ -1,5 +1,5 @@
+// AdalJS v1.0.17
 //----------------------------------------------------------------------
-// AdalJS v1.0.18
 // @preserve Copyright (c) Microsoft Open Technologies, Inc.
 // All Rights Reserved
 // Apache License 2.0
@@ -16,197 +16,108 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //----------------------------------------------------------------------
+const VERSION = "1.0.17",
+    ACCESS_TOKEN = "access_token",
+    EXPIRES_IN = "expires_in",
+    ID_TOKEN = "id_token",
+    ERROR = "error",
+    ERROR_DESCRIPTION = "error_description",
+    SESSION_STATE = "session_state",
+    RESOURCE_DELIMETER = "|",
+    CACHE_DELIMETER = "||",
+    POPUP_WIDTH = 483,
+    POPUP_HEIGHT = 600
 
-var AuthenticationContext = (function () {
-    "use strict"
+export enum LogLevel {
+    Error = 0,
+    Warn,
+    Info,
+    Verbose,
+}
+const LOG_LEVEL_LABELS = {
+    [LogLevel.Error]: "ERROR:",
+    [LogLevel.Warn]: "WARNING:",
+    [LogLevel.Info]: "INFO:",
+    [LogLevel.Verbose]: "VERBOSE:",
+}
 
-    /**
-     * Configuration options for Authentication Context.
-     * @class config
-     *  @property {string} tenant - Your target tenant.
-     *  @property {string} clientId - Client ID assigned to your app by Azure Active Directory.
-     *  @property {string} redirectUri - Endpoint at which you expect to receive tokens.Defaults to `window.location.href`.
-     *  @property {string} instance - Azure Active Directory Instance.Defaults to `https://login.microsoftonline.com/`.
-     *  @property {Array} endpoints - Collection of {Endpoint-ResourceId} used for automatically attaching tokens in webApi calls.
-     *  @property {Boolean} popUp - Set this to true to enable login in a popup winodow instead of a full redirect.Defaults to `false`.
-     *  @property {string} localLoginUrl - Set this to redirect the user to a custom login page.
-     *  @property {function} displayCall - User defined function of handling the navigation to Azure AD authorization endpoint in case of login. Defaults to 'null'.
-     *  @property {string} postLogoutRedirectUri - Redirects the user to postLogoutRedirectUri after logout. Defaults is 'redirectUri'.
-     *  @property {string} cacheLocation - Sets browser storage to either 'localStorage' or sessionStorage'. Defaults to 'sessionStorage'.
-     *  @property {Array.<string>} anonymousEndpoints Array of keywords or URI's. Adal will not attach a token to outgoing requests that have these keywords or uri. Defaults to 'null'.
-     *  @property {number} expireOffsetSeconds If the cached token is about to be expired in the expireOffsetSeconds (in seconds), Adal will renew the token instead of using the cached token. Defaults to 300 seconds.
-     *  @property {string} correlationId Unique identifier used to map the request with the response. Defaults to RFC4122 version 4 guid (128 bits).
-     *  @property {number} loadFrameTimeout The number of milliseconds of inactivity before a token renewal response from AAD should be considered timed out.
-     */
+enum RequestType {
+    LOGIN = "LOGIN",
+    RENEW_TOKEN = "RENEW_TOKEN",
+    UNKNOWN = "UNKNOWN",
+}
+enum ResponseType {
+    ID_TOKEN = "id_token token",
+    TOKEN = "token",
+}
 
-    /**
-     * Creates a new AuthenticationContext object.
-     * @constructor
-     * @param {config}  config               Configuration options for AuthenticationContext
-     */
+enum StorageKey {
+    TOKEN_KEYS = "adal.token.keys",
+    ACCESS_TOKEN_KEY = "adal.access.token.key",
+    EXPIRATION_KEY = "adal.expiration.key",
+    STATE_LOGIN = "adal.state.login",
+    STATE_RENEW = "adal.state.renew",
+    NONCE_IDTOKEN = "adal.nonce.idtoken",
+    SESSION_STATE = "adal.session.state",
+    USERNAME = "adal.username",
+    IDTOKEN = "adal.idtoken",
+    ERROR = "adal.error",
+    ERROR_DESCRIPTION = "adal.error.description",
+    LOGIN_REQUEST = "adal.login.request",
+    LOGIN_ERROR = "adal.login.error",
+    RENEW_STATUS = "adal.token.renew.status",
+    ANGULAR_LOGIN_REQUEST = "adal.angular.login.request",
+}
 
-    AuthenticationContext = function (config) {
-        /**
-         * Enum for request type
-         * @enum {string}
-         */
-        this.REQUEST_TYPE = {
-            LOGIN: "LOGIN",
-            RENEW_TOKEN: "RENEW_TOKEN",
-            UNKNOWN: "UNKNOWN",
+enum TokenRenewStatus {
+    Canceled = "Canceled",
+    Completed = "Completed",
+    InProgress = "In Progress",
+}
+
+type Config = any
+type Options = any
+export class Adal {
+    config: Config
+    logLevel = LogLevel.Error
+    piiLoggingEnabled = false
+    isAngular = false
+
+    // TODO: move off of instance for smaller property names
+    _user: any
+    _idTokenNonce: any
+    _activeRenewals: any = {}
+    _loginInProgress = false
+    _acquireTokenInProgress = false
+    _renewStates: any[] = []
+    _openedWindows: any[] = []
+    _callBackMappedToRenewStates: any = {}
+    _callBacksMappedToRenewStates: any = {}
+    _requestType = RequestType.LOGIN
+
+    constructor(options: Options) {
+        if ((window as any)._adalInstance) {
+            return (window as any)._adalInstance
         }
-
-        this.RESPONSE_TYPE = {
-            ID_TOKEN_TOKEN: "id_token token",
-            TOKEN: "token",
+        this.config = {
+            popUp: false,
+            instance: "https://login.microsoftonline.com/",
+            loginResource: options.clientId,
+            laodFrameTimeout: 6000,
+            anonymousEndpoints: [],
+            navigateToLoginRequestUrl: true,
+            tenant: "common",
+            redirectUri: window.location.href.split("?")[0].split("#")[0],
+            callback: () => {},
+            ...options,
         }
-
-        /**
-         * Enum for storage constants
-         * @enum {string}
-         */
-        this.CONSTANTS = {
-            ACCESS_TOKEN: "access_token",
-            EXPIRES_IN: "expires_in",
-            ID_TOKEN: "id_token",
-            ERROR_DESCRIPTION: "error_description",
-            SESSION_STATE: "session_state",
-            ERROR: "error",
-            STORAGE: {
-                TOKEN_KEYS: "adal.token.keys",
-                ACCESS_TOKEN_KEY: "adal.access.token.key",
-                EXPIRATION_KEY: "adal.expiration.key",
-                STATE_LOGIN: "adal.state.login",
-                STATE_RENEW: "adal.state.renew",
-                NONCE_IDTOKEN: "adal.nonce.idtoken",
-                SESSION_STATE: "adal.session.state",
-                USERNAME: "adal.username",
-                IDTOKEN: "adal.idtoken",
-                ERROR: "adal.error",
-                ERROR_DESCRIPTION: "adal.error.description",
-                LOGIN_REQUEST: "adal.login.request",
-                LOGIN_ERROR: "adal.login.error",
-                RENEW_STATUS: "adal.token.renew.status",
-                ANGULAR_LOGIN_REQUEST: "adal.angular.login.request",
-            },
-            RESOURCE_DELIMETER: "|",
-            CACHE_DELIMETER: "||",
-            LOADFRAME_TIMEOUT: 6000,
-            TOKEN_RENEW_STATUS_CANCELED: "Canceled",
-            TOKEN_RENEW_STATUS_COMPLETED: "Completed",
-            TOKEN_RENEW_STATUS_IN_PROGRESS: "In Progress",
-            LOGGING_LEVEL: {
-                ERROR: 0,
-                WARN: 1,
-                INFO: 2,
-                VERBOSE: 3,
-            },
-            LEVEL_STRING_MAP: {
-                0: "ERROR:",
-                1: "WARNING:",
-                2: "INFO:",
-                3: "VERBOSE:",
-            },
-            POPUP_WIDTH: 483,
-            POPUP_HEIGHT: 600,
-        }
-
-        if (AuthenticationContext.prototype._singletonInstance) {
-            return AuthenticationContext.prototype._singletonInstance
-        }
-        AuthenticationContext.prototype._singletonInstance = this
-
-        // public
-        this.instance = "https://login.microsoftonline.com/"
-        this.config = {}
-        this.callback = null
-        this.popUp = false
-        this.isAngular = false
-
-        // private
-        this._user = null
-        this._activeRenewals = {}
-        this._loginInProgress = false
-        this._acquireTokenInProgress = false
-        this._renewStates = []
-        this._callBackMappedToRenewStates = {}
-        this._callBacksMappedToRenewStates = {}
-        this._openedWindows = []
-        this._requestType = this.REQUEST_TYPE.LOGIN
-        window._adalInstance = this
-        this._storageSupport = {
-            localStorage: null,
-            sessionStorage: null,
-        }
-
-        // validate before constructor assignments
-        if (config.displayCall && typeof config.displayCall !== "function") {
-            throw new Error("displayCall is not a function")
-        }
-
-        if (!config.clientId) {
-            throw new Error("clientId is required")
-        }
-
-        this.config = this._cloneConfig(config)
-
-        if (this.config.navigateToLoginRequestUrl === undefined)
-            this.config.navigateToLoginRequestUrl = true
-
-        if (this.config.popUp) this.popUp = true
-
-        if (this.config.callback && typeof this.config.callback === "function")
-            this.callback = this.config.callback
-
-        if (this.config.instance) {
-            this.instance = this.config.instance
-        }
-
-        // App can request idtoken for itself using clientid as resource
-        if (!this.config.loginResource) {
-            this.config.loginResource = this.config.clientId
-        }
-
-        // redirect and logout_redirect are set to current location by default
-        if (!this.config.redirectUri) {
-            // strip off query parameters or hashes from the redirect uri as AAD does not allow those.
-            this.config.redirectUri = window.location.href
-                .split("?")[0]
-                .split("#")[0]
-        }
-
-        if (!this.config.postLogoutRedirectUri) {
-            // strip off query parameters or hashes from the post logout redirect uri as AAD does not allow those.
-            this.config.postLogoutRedirectUri = window.location.href
-                .split("?")[0]
-                .split("#")[0]
-        }
-
-        if (!this.config.anonymousEndpoints) {
-            this.config.anonymousEndpoints = []
-        }
-
-        if (this.config.isAngular) {
-            this.isAngular = this.config.isAngular
-        }
-
-        if (this.config.loadFrameTimeout) {
-            this.CONSTANTS.LOADFRAME_TIMEOUT = this.config.loadFrameTimeout
-        }
-    }
-
-    if (typeof window !== "undefined") {
-        window.Logging = {
-            piiLoggingEnabled: false,
-            level: 0,
-            log: function (message) {},
-        }
+        ;(window as any)._adalInstance = this
     }
 
     /**
      * Initiates the login process by redirecting the user to Azure AD authorization endpoint.
      */
-    AuthenticationContext.prototype.login = function () {
+    login() {
         if (this._loginInProgress) {
             this.info("Login in progress")
             return
@@ -218,29 +129,23 @@ var AuthenticationContext = (function () {
         var expectedState = this._guid()
         this.config.state = expectedState
         this._idTokenNonce = this._guid()
-        var loginStartPage = this._getItem(
-            this.CONSTANTS.STORAGE.ANGULAR_LOGIN_REQUEST,
-        )
+        var loginStartPage = this._getItem(StorageKey.ANGULAR_LOGIN_REQUEST)
 
         if (!loginStartPage || loginStartPage === "") {
             loginStartPage = window.location.href
         } else {
-            this._saveItem(this.CONSTANTS.STORAGE.ANGULAR_LOGIN_REQUEST, "")
+            this._saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
         }
 
         this.verbose(
             "Expected state: " + expectedState + " startPage:" + loginStartPage,
         )
-        this._saveItem(this.CONSTANTS.STORAGE.LOGIN_REQUEST, loginStartPage)
-        this._saveItem(this.CONSTANTS.STORAGE.LOGIN_ERROR, "")
-        this._saveItem(this.CONSTANTS.STORAGE.STATE_LOGIN, expectedState, true)
-        this._saveItem(
-            this.CONSTANTS.STORAGE.NONCE_IDTOKEN,
-            this._idTokenNonce,
-            true,
-        )
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR, "")
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR_DESCRIPTION, "")
+        this._saveItem(StorageKey.LOGIN_REQUEST, loginStartPage)
+        this._saveItem(StorageKey.LOGIN_ERROR, "")
+        this._saveItem(StorageKey.STATE_LOGIN, expectedState, true)
+        this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
+        this._saveItem(StorageKey.ERROR, "")
+        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
         var urlNavigate =
             this._getNavigateUrl("id_token", null) +
             "&nonce=" +
@@ -249,13 +154,13 @@ var AuthenticationContext = (function () {
         if (this.config.displayCall) {
             // User defined way of handling the navigation
             this.config.displayCall(urlNavigate)
-        } else if (this.popUp) {
-            this._saveItem(this.CONSTANTS.STORAGE.STATE_LOGIN, "") // so requestInfo does not match redirect case
+        } else if (this.config.popUp) {
+            this._saveItem(StorageKey.STATE_LOGIN, "") // so requestInfo does not match redirect case
             this._renewStates.push(expectedState)
             this.registerCallback(
                 expectedState,
                 this.config.clientId,
-                this.callback,
+                this.config.callback,
             )
             this._loginPopup(urlNavigate)
         } else {
@@ -267,11 +172,11 @@ var AuthenticationContext = (function () {
      * Configures popup window for login.
      * @ignore
      */
-    AuthenticationContext.prototype._openPopup = function (
-        urlNavigate,
-        title,
-        popUpWidth,
-        popUpHeight,
+    _openPopup(
+        urlNavigate: string,
+        title: string,
+        popUpWidth: number,
+        popUpHeight: number,
     ) {
         try {
             /**
@@ -306,7 +211,7 @@ var AuthenticationContext = (function () {
                     top +
                     ", left=" +
                     left,
-            )
+            )!
 
             if (popupWindow.focus) {
                 popupWindow.focus()
@@ -321,17 +226,17 @@ var AuthenticationContext = (function () {
         }
     }
 
-    AuthenticationContext.prototype._handlePopupError = function (
-        loginCallback,
-        resource,
-        error,
-        errorDesc,
-        loginError,
+    _handlePopupError(
+        loginCallback: any,
+        resource: string | undefined | null,
+        error: string,
+        errorDesc: string,
+        loginError: string,
     ) {
         this.warn(errorDesc)
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR, error)
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR_DESCRIPTION, errorDesc)
-        this._saveItem(this.CONSTANTS.STORAGE.LOGIN_ERROR, loginError)
+        this._saveItem(StorageKey.ERROR, error)
+        this._saveItem(StorageKey.ERROR_DESCRIPTION, errorDesc)
+        this._saveItem(StorageKey.LOGIN_ERROR, loginError)
 
         if (resource && this._activeRenewals[resource]) {
             this._activeRenewals[resource] = null
@@ -350,18 +255,14 @@ var AuthenticationContext = (function () {
      * attached to the URI fragment as an id_token field. It closes popup window after redirection.
      * @ignore
      */
-    AuthenticationContext.prototype._loginPopup = function (
-        urlNavigate,
-        resource,
-        callback,
-    ) {
+    _loginPopup(urlNavigate: string, resource?: string, callback?: any) {
         var popupWindow = this._openPopup(
             urlNavigate,
             "login",
-            this.CONSTANTS.POPUP_WIDTH,
-            this.CONSTANTS.POPUP_HEIGHT,
+            POPUP_WIDTH,
+            POPUP_HEIGHT,
         )
-        var loginCallback = callback || this.callback
+        var loginCallback = callback || this.config.callback
 
         if (popupWindow == null) {
             var error = "Error opening popup"
@@ -385,9 +286,7 @@ var AuthenticationContext = (function () {
             var registeredRedirectUri = this.config.redirectUri
         }
 
-        var that = this
-
-        var pollTimer = window.setInterval(function () {
+        var pollTimer = window.setInterval(() => {
             if (
                 !popupWindow ||
                 popupWindow.closed ||
@@ -397,14 +296,14 @@ var AuthenticationContext = (function () {
                 var errorDesc =
                     "Popup Window closed by UI action/ Popup Window handle destroyed due to cross zone navigation in IE/Edge"
 
-                if (that.isAngular) {
-                    that._broadcast(
+                if (this.isAngular) {
+                    this._broadcast(
                         "adal:popUpClosed",
-                        errorDesc + that.CONSTANTS.RESOURCE_DELIMETER + error,
+                        errorDesc + RESOURCE_DELIMETER + error,
                     )
                 }
 
-                that._handlePopupError(
+                this._handlePopupError(
                     loginCallback,
                     resource,
                     error,
@@ -421,20 +320,20 @@ var AuthenticationContext = (function () {
                         encodeURI(registeredRedirectUri),
                     ) != -1
                 ) {
-                    if (that.isAngular) {
-                        that._broadcast(
+                    if (this.isAngular) {
+                        this._broadcast(
                             "adal:popUpHashChanged",
                             popUpWindowLocation.hash,
                         )
                     } else {
-                        that.handleWindowCallback(popUpWindowLocation.hash)
+                        this.handleWindowCallback(popUpWindowLocation.hash)
                     }
 
                     window.clearInterval(pollTimer)
-                    that._loginInProgress = false
-                    that._acquireTokenInProgress = false
-                    that.info("Closing popup window")
-                    that._openedWindows = []
+                    this._loginInProgress = false
+                    this._acquireTokenInProgress = false
+                    this.info("Closing popup window")
+                    this._openedWindows = []
                     popupWindow.close()
                     return
                 }
@@ -442,7 +341,7 @@ var AuthenticationContext = (function () {
         }, 1)
     }
 
-    AuthenticationContext.prototype._broadcast = function (eventName, data) {
+    _broadcast(eventName: string, data: any) {
         // Custom Event is not supported in IE, below IIFE will polyfill the CustomEvent() constructor functionality in Internet Explorer 9 and higher
         ;(function () {
             if (typeof window.CustomEvent === "function") {
@@ -473,7 +372,7 @@ var AuthenticationContext = (function () {
         window.dispatchEvent(evt)
     }
 
-    AuthenticationContext.prototype.loginInProgress = function () {
+    loginInProgress() {
         return this._loginInProgress
     }
 
@@ -482,12 +381,13 @@ var AuthenticationContext = (function () {
      * @ignore
      * @returns {Boolean} 'true' if login is in progress, else returns 'false'.
      */
-    AuthenticationContext.prototype._hasResource = function (key) {
-        var keys = this._getItem(this.CONSTANTS.STORAGE.TOKEN_KEYS)
+    _hasResource(key) {
+        var keys = this._getItem(StorageKey.TOKEN_KEYS)
+        // @ts-expect-error
         return (
             keys &&
             !this._isEmpty(keys) &&
-            keys.indexOf(key + this.CONSTANTS.RESOURCE_DELIMETER) > -1
+            keys.indexOf(key + RESOURCE_DELIMETER) > -1
         )
     }
 
@@ -496,29 +396,23 @@ var AuthenticationContext = (function () {
      * @param {string}   resource A URI that identifies the resource for which the token is requested.
      * @returns {string} token if if it exists and not expired, otherwise null.
      */
-    AuthenticationContext.prototype.getCachedToken = function (resource) {
+    getCachedToken(resource: string) {
         if (!this._hasResource(resource)) {
             return null
         }
 
-        var token = this._getItem(
-            this.CONSTANTS.STORAGE.ACCESS_TOKEN_KEY + resource,
-        )
-        var expiry = this._getItem(
-            this.CONSTANTS.STORAGE.EXPIRATION_KEY + resource,
-        )
+        var token = this._getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
+        var expiry = this._getItem(StorageKey.EXPIRATION_KEY + resource)
 
         // If expiration is within offset, it will force renew
         var offset = this.config.expireOffsetSeconds || 300
 
+        // @ts-expect-error
         if (expiry && expiry > this._now() + offset) {
             return token
         } else {
-            this._saveItem(
-                this.CONSTANTS.STORAGE.ACCESS_TOKEN_KEY + resource,
-                "",
-            )
-            this._saveItem(this.CONSTANTS.STORAGE.EXPIRATION_KEY + resource, 0)
+            this._saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
+            this._saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
             return null
         }
     }
@@ -534,12 +428,12 @@ var AuthenticationContext = (function () {
      * If user object exists, returns it. Else creates a new user object by decoding id_token from the cache.
      * @returns {User} user object
      */
-    AuthenticationContext.prototype.getCachedUser = function () {
+    getCachedUser() {
         if (this._user) {
             return this._user
         }
 
-        var idtoken = this._getItem(this.CONSTANTS.STORAGE.IDTOKEN)
+        var idtoken = this._getItem(StorageKey.IDTOKEN)
         this._user = this._createUser(idtoken)
         return this._user
     }
@@ -550,49 +444,44 @@ var AuthenticationContext = (function () {
      * @param {string}   expectedState A unique identifier (guid).
      * @param {tokenCallback} callback - The callback provided by the caller. It will be called with token or error.
      */
-    AuthenticationContext.prototype.registerCallback = function (
-        expectedState,
-        resource,
-        callback,
-    ) {
+    registerCallback(expectedState: any, resource: string, callback: any) {
         this._activeRenewals[resource] = expectedState
 
         if (!this._callBacksMappedToRenewStates[expectedState]) {
             this._callBacksMappedToRenewStates[expectedState] = []
         }
 
-        var self = this
         this._callBacksMappedToRenewStates[expectedState].push(callback)
 
         if (!this._callBackMappedToRenewStates[expectedState]) {
-            this._callBackMappedToRenewStates[expectedState] = function (
+            this._callBackMappedToRenewStates[expectedState] = (
                 errorDesc,
                 token,
                 error,
                 tokenType,
-            ) {
-                self._activeRenewals[resource] = null
+            ) => {
+                this._activeRenewals[resource] = null
 
                 for (
                     var i = 0;
                     i <
-                    self._callBacksMappedToRenewStates[expectedState].length;
+                    this._callBacksMappedToRenewStates[expectedState].length;
                     ++i
                 ) {
                     try {
-                        self._callBacksMappedToRenewStates[expectedState][i](
+                        this._callBacksMappedToRenewStates[expectedState][i](
                             errorDesc,
                             token,
                             error,
                             tokenType,
                         )
                     } catch (error) {
-                        self.warn(error)
+                        this.warn(error)
                     }
                 }
 
-                self._callBacksMappedToRenewStates[expectedState] = null
-                self._callBackMappedToRenewStates[expectedState] = null
+                this._callBacksMappedToRenewStates[expectedState] = null
+                this._callBackMappedToRenewStates[expectedState] = null
             }
         }
     }
@@ -605,11 +494,7 @@ var AuthenticationContext = (function () {
      * Acquires access token with hidden iframe
      * @ignore
      */
-    AuthenticationContext.prototype._renewToken = function (
-        resource,
-        callback,
-        responseType,
-    ) {
+    _renewToken(resource, callback, responseType) {
         // use iframe to try to renew token
         // use given resource to create new authz url
         this.info("renewToken is called for resource:" + resource)
@@ -626,13 +511,9 @@ var AuthenticationContext = (function () {
             "prompt",
         )
 
-        if (responseType === this.RESPONSE_TYPE.ID_TOKEN_TOKEN) {
+        if (responseType === ResponseType.ID_TOKEN) {
             this._idTokenNonce = this._guid()
-            this._saveItem(
-                this.CONSTANTS.STORAGE.NONCE_IDTOKEN,
-                this._idTokenNonce,
-                true,
-            )
+            this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
             urlNavigate += "&nonce=" + encodeURIComponent(this._idTokenNonce)
         }
 
@@ -640,6 +521,7 @@ var AuthenticationContext = (function () {
         urlNavigate = this._addHintParameters(urlNavigate)
         this.registerCallback(expectedState, resource, callback)
         this.verbosePii("Navigate to:" + urlNavigate)
+        // @ts-expect-error
         frameHandle.src = "about:blank"
         this._loadFrameTimeout(
             urlNavigate,
@@ -652,20 +534,13 @@ var AuthenticationContext = (function () {
      * Renews idtoken for app's own backend when resource is clientId and calls the callback with token/error
      * @ignore
      */
-    AuthenticationContext.prototype._renewIdToken = function (
-        callback,
-        responseType,
-    ) {
+    _renewIdToken(callback, responseType) {
         // use iframe to try to renew token
         this.info("renewIdToken is called")
         var frameHandle = this._addAdalFrame("adalIdTokenFrame")
         var expectedState = this._guid() + "|" + this.config.clientId
         this._idTokenNonce = this._guid()
-        this._saveItem(
-            this.CONSTANTS.STORAGE.NONCE_IDTOKEN,
-            this._idTokenNonce,
-            true,
-        )
+        this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
         this.config.state = expectedState
         // renew happens in iframe, so it keeps javascript context
         this._renewStates.push(expectedState)
@@ -685,6 +560,7 @@ var AuthenticationContext = (function () {
         urlNavigate += "&nonce=" + encodeURIComponent(this._idTokenNonce)
         this.registerCallback(expectedState, this.config.clientId, callback)
         this.verbosePii("Navigate to:" + urlNavigate)
+        // @ts-expect-error
         frameHandle.src = "about:blank"
         this._loadFrameTimeout(
             urlNavigate,
@@ -697,10 +573,7 @@ var AuthenticationContext = (function () {
      * Checks if the authorization endpoint URL contains query string parameters
      * @ignore
      */
-    AuthenticationContext.prototype._urlContainsQueryStringParameter = function (
-        name,
-        url,
-    ) {
+    _urlContainsQueryStringParameter = function (name, url) {
         // regex to detect pattern of a ? or & followed by the name parameter and an equals character
         var regex = new RegExp("[\\?&]" + name + "=")
         return regex.test(url)
@@ -710,10 +583,7 @@ var AuthenticationContext = (function () {
      * Removes the query string parameter from the authorization endpoint URL if it exists
      * @ignore
      */
-    AuthenticationContext.prototype._urlRemoveQueryStringParameter = function (
-        url,
-        name,
-    ) {
+    _urlRemoveQueryStringParameter = function (url, name) {
         // we remove &name=value, name=value& and name=value
         // &name=value
         var regex = new RegExp("(\\&" + name + "=)[^&]+")
@@ -732,73 +602,62 @@ var AuthenticationContext = (function () {
     /**
      * @ignore
      */
-    AuthenticationContext.prototype._loadFrameTimeout = function (
-        urlNavigation,
-        frameName,
-        resource,
-    ) {
+    _loadFrameTimeout = function (urlNavigation, frameName, resource) {
         //set iframe session to pending
         this.verbose("Set loading state to pending for: " + resource)
         this._saveItem(
-            this.CONSTANTS.STORAGE.RENEW_STATUS + resource,
-            this.CONSTANTS.TOKEN_RENEW_STATUS_IN_PROGRESS,
+            StorageKey.RENEW_STATUS + resource,
+            TokenRenewStatus.InProgress,
         )
         this._loadFrame(urlNavigation, frameName)
-        var self = this
 
-        setTimeout(function () {
+        setTimeout(() => {
             if (
-                self._getItem(
-                    self.CONSTANTS.STORAGE.RENEW_STATUS + resource,
-                ) === self.CONSTANTS.TOKEN_RENEW_STATUS_IN_PROGRESS
+                this._getItem(
+                    StorageKey.RENEW_STATUS + resource,
+                ) === TokenRenewStatus.InProgress
             ) {
                 // fail the iframe session if it's in pending state
-                self.verbose(
+                this.verbose(
                     "Loading frame has timed out after: " +
-                        self.CONSTANTS.LOADFRAME_TIMEOUT / 1000 +
+                        this.config.loadFrameTimeout / 1000 +
                         " seconds for resource " +
                         resource,
                 )
-                var expectedState = self._activeRenewals[resource]
+                var expectedState = this._activeRenewals[resource]
 
                 if (
                     expectedState &&
-                    self._callBackMappedToRenewStates[expectedState]
+                    this._callBackMappedToRenewStates[expectedState]
                 ) {
-                    self._callBackMappedToRenewStates[expectedState](
+                    this._callBackMappedToRenewStates[expectedState](
                         "Token renewal operation failed due to timeout",
                         null,
                         "Token Renewal Failed",
                     )
                 }
 
-                self._saveItem(
-                    self.CONSTANTS.STORAGE.RENEW_STATUS + resource,
-                    self.CONSTANTS.TOKEN_RENEW_STATUS_CANCELED,
+                this._saveItem(
+                    StorageKey.RENEW_STATUS + resource,
+                    TokenRenewStatus.Canceled,
                 )
             }
-        }, self.CONSTANTS.LOADFRAME_TIMEOUT)
+        }, this.config.loadFrameTimeout)
     }
 
     /**
      * Loads iframe with authorization endpoint URL
      * @ignore
      */
-    AuthenticationContext.prototype._loadFrame = function (
-        urlNavigate,
-        frameName,
-    ) {
+    _loadFrame(urlNavigate, frameName) {
         // This trick overcomes iframe navigation in IE
         // IE does not load the page consistently in iframe
-        var self = this
-        self.info("LoadFrame: " + frameName)
-        var frameCheck = frameName
-        setTimeout(function () {
-            var frameHandle = self._addAdalFrame(frameCheck)
-
+        this.info("LoadFrame: " + frameName)
+        setTimeout(() => {
+            var frameHandle = this._addAdalFrame(frameName) as any
             if (frameHandle.src === "" || frameHandle.src === "about:blank") {
                 frameHandle.src = urlNavigate
-                self._loadFrame(urlNavigate, frameCheck)
+                this._loadFrame(urlNavigate, frameName)
             }
         }, 500)
     }
@@ -815,10 +674,7 @@ var AuthenticationContext = (function () {
      * @param {string}   resource  ResourceUri identifying the target resource
      * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
      */
-    AuthenticationContext.prototype.acquireToken = function (
-        resource,
-        callback,
-    ) {
+    acquireToken(resource, callback) {
         if (this._isEmpty(resource)) {
             this.warn("resource is required")
             callback("resource is required", null, "resource is required")
@@ -855,7 +711,7 @@ var AuthenticationContext = (function () {
                 callback,
             )
         } else {
-            this._requestType = this.REQUEST_TYPE.RENEW_TOKEN
+            this._requestType = RequestType.RENEW_TOKEN
             if (resource === this.config.clientId) {
                 // App uses idtoken to send to api endpoints
                 // Default resource is tracked as clientid to store this token
@@ -864,10 +720,7 @@ var AuthenticationContext = (function () {
                     this._renewIdToken(callback)
                 } else {
                     this.verbose("renewing idtoken and access_token")
-                    this._renewIdToken(
-                        callback,
-                        this.RESPONSE_TYPE.ID_TOKEN_TOKEN,
-                    )
+                    this._renewIdToken(callback, ResponseType.ID_TOKEN)
                 }
             } else {
                 if (this._user) {
@@ -875,11 +728,7 @@ var AuthenticationContext = (function () {
                     this._renewToken(resource, callback)
                 } else {
                     this.verbose("renewing idtoken and access_token")
-                    this._renewToken(
-                        resource,
-                        callback,
-                        this.RESPONSE_TYPE.ID_TOKEN_TOKEN,
-                    )
+                    this._renewToken(resource, callback, ResponseType.ID_TOKEN)
                 }
             }
         }
@@ -891,12 +740,7 @@ var AuthenticationContext = (function () {
      * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
      * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
      */
-    AuthenticationContext.prototype.acquireTokenPopup = function (
-        resource,
-        extraQueryParameters,
-        claims,
-        callback,
-    ) {
+    acquireTokenPopup(resource, extraQueryParameters, claims, callback) {
         if (this._isEmpty(resource)) {
             this.warn("resource is required")
             callback("resource is required", null, "resource is required")
@@ -922,7 +766,7 @@ var AuthenticationContext = (function () {
         var expectedState = this._guid() + "|" + resource
         this.config.state = expectedState
         this._renewStates.push(expectedState)
-        this._requestType = this.REQUEST_TYPE.RENEW_TOKEN
+        this._requestType = RequestType.RENEW_TOKEN
         this.verbose("Renew token Expected state: " + expectedState)
         // remove the existing prompt=... query parameter and add prompt=select_account
         var urlNavigate = this._urlRemoveQueryStringParameter(
@@ -956,18 +800,14 @@ var AuthenticationContext = (function () {
      * @param {string}   resource  ResourceUri identifying the target resource
      * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
      */
-    AuthenticationContext.prototype.acquireTokenRedirect = function (
-        resource,
-        extraQueryParameters,
-        claims,
-    ) {
+    acquireTokenRedirect(resource, extraQueryParameters, claims) {
+        const {callback} = this.config
+
         if (this._isEmpty(resource)) {
             this.warn("resource is required")
             callback("resource is required", null, "resource is required")
             return
         }
-
-        var callback = this.callback
 
         if (!this._user) {
             this.warn("User login is required")
@@ -1010,18 +850,16 @@ var AuthenticationContext = (function () {
         this.info(
             "acquireToken interactive is called for the resource " + resource,
         )
-        this._saveItem(
-            this.CONSTANTS.STORAGE.LOGIN_REQUEST,
-            window.location.href,
-        )
-        this._saveItem(this.CONSTANTS.STORAGE.STATE_RENEW, expectedState, true)
+        this._saveItem(StorageKey.LOGIN_REQUEST, window.location.href)
+        this._saveItem(StorageKey.STATE_RENEW, expectedState, true)
         this.promptUser(urlNavigate)
     }
+
     /**
      * Redirects the browser to Azure AD authorization endpoint.
      * @param {string}   urlNavigate  Url of the authorization endpoint.
      */
-    AuthenticationContext.prototype.promptUser = function (urlNavigate) {
+    promptUser(urlNavigate: string) {
         if (urlNavigate) {
             this.infoPii("Navigate to:" + urlNavigate)
             window.location.replace(urlNavigate)
@@ -1033,56 +871,44 @@ var AuthenticationContext = (function () {
     /**
      * Clears cache items.
      */
-    AuthenticationContext.prototype.clearCache = function () {
-        this._user = null
-        this._saveItem(this.CONSTANTS.STORAGE.LOGIN_REQUEST, "")
-        this._saveItem(this.CONSTANTS.STORAGE.ANGULAR_LOGIN_REQUEST, "")
-        this._saveItem(this.CONSTANTS.STORAGE.SESSION_STATE, "")
-        this._saveItem(this.CONSTANTS.STORAGE.STATE_LOGIN, "")
-        this._saveItem(this.CONSTANTS.STORAGE.STATE_RENEW, "")
+    clearCache() {
+        this._saveItem(StorageKey.LOGIN_REQUEST, "")
+        this._saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
+        this._saveItem(StorageKey.SESSION_STATE, "")
+        this._saveItem(StorageKey.STATE_LOGIN, "")
+        this._saveItem(StorageKey.STATE_RENEW, "")
         this._renewStates = []
-        this._saveItem(this.CONSTANTS.STORAGE.NONCE_IDTOKEN, "")
-        this._saveItem(this.CONSTANTS.STORAGE.IDTOKEN, "")
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR, "")
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR_DESCRIPTION, "")
-        this._saveItem(this.CONSTANTS.STORAGE.LOGIN_ERROR, "")
-        this._saveItem(this.CONSTANTS.STORAGE.LOGIN_ERROR, "")
-        var keys = this._getItem(this.CONSTANTS.STORAGE.TOKEN_KEYS)
+        this._saveItem(StorageKey.NONCE_IDTOKEN, "")
+        this._saveItem(StorageKey.IDTOKEN, "")
+        this._saveItem(StorageKey.ERROR, "")
+        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
+        this._saveItem(StorageKey.LOGIN_ERROR, "")
+        this._saveItem(StorageKey.LOGIN_ERROR, "")
+        var keys = this._getItem(StorageKey.TOKEN_KEYS) as any
 
         if (!this._isEmpty(keys)) {
-            keys = keys.split(this.CONSTANTS.RESOURCE_DELIMETER)
+            keys = keys.split(RESOURCE_DELIMETER)
             for (var i = 0; i < keys.length && keys[i] !== ""; i++) {
-                this._saveItem(
-                    this.CONSTANTS.STORAGE.ACCESS_TOKEN_KEY + keys[i],
-                    "",
-                )
-                this._saveItem(
-                    this.CONSTANTS.STORAGE.EXPIRATION_KEY + keys[i],
-                    0,
-                )
+                this._saveItem(StorageKey.ACCESS_TOKEN_KEY + keys[i], "")
+                this._saveItem(StorageKey.EXPIRATION_KEY + keys[i], 0)
             }
         }
 
-        this._saveItem(this.CONSTANTS.STORAGE.TOKEN_KEYS, "")
+        this._saveItem(StorageKey.TOKEN_KEYS, "")
     }
 
     /**
      * Clears cache items for a given resource.
      * @param {string}  resource a URI that identifies the resource.
      */
-    AuthenticationContext.prototype.clearCacheForResource = function (
-        resource,
-    ) {
-        this._saveItem(this.CONSTANTS.STORAGE.STATE_RENEW, "")
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR, "")
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR_DESCRIPTION, "")
+    clearCacheForResource(resource: string) {
+        this._saveItem(StorageKey.STATE_RENEW, "")
+        this._saveItem(StorageKey.ERROR, "")
+        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
 
         if (this._hasResource(resource)) {
-            this._saveItem(
-                this.CONSTANTS.STORAGE.ACCESS_TOKEN_KEY + resource,
-                "",
-            )
-            this._saveItem(this.CONSTANTS.STORAGE.EXPIRATION_KEY + resource, 0)
+            this._saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
+            this._saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
         }
     }
 
@@ -1090,8 +916,9 @@ var AuthenticationContext = (function () {
      * Redirects user to logout endpoint.
      * After logout, it will redirect to postLogoutRedirectUri if added as a property on the config object.
      */
-    AuthenticationContext.prototype.logOut = function () {
+    logOut() {
         this.clearCache()
+        this._user = null
         var urlNavigate
 
         if (this.config.logOutUri) {
@@ -1110,14 +937,14 @@ var AuthenticationContext = (function () {
                     encodeURIComponent(this.config.postLogoutRedirectUri)
             }
 
-            urlNavigate = this.instance + tenant + "/oauth2/logout?" + logout
+            urlNavigate = this.config.instance + tenant + "/oauth2/logout?" + logout
         }
 
         this.infoPii("Logout navigate to: " + urlNavigate)
         this.promptUser(urlNavigate)
     }
 
-    AuthenticationContext.prototype._isEmpty = function (str) {
+    _isEmpty(str) {
         return typeof str === "undefined" || !str || 0 === str.length
     }
 
@@ -1131,7 +958,7 @@ var AuthenticationContext = (function () {
      * Calls the passed in callback with the user object or error message related to the user.
      * @param {userCallback} callback - The callback provided by the caller. It will be called with user or error.
      */
-    AuthenticationContext.prototype.getUser = function (callback) {
+    getUser(callback) {
         // IDToken is first call
         if (typeof callback !== "function") {
             throw new Error("callback is not a function")
@@ -1144,7 +971,7 @@ var AuthenticationContext = (function () {
         }
 
         // frame is used to get idtoken
-        var idtoken = this._getItem(this.CONSTANTS.STORAGE.IDTOKEN)
+        var idtoken = this._getItem(StorageKey.IDTOKEN)
 
         if (!this._isEmpty(idtoken)) {
             this.info("User exists in cache: ")
@@ -1161,10 +988,8 @@ var AuthenticationContext = (function () {
      * domain_hint can be one of users/organisations which when added skips the email based discovery process of the user.
      * @ignore
      */
-    AuthenticationContext.prototype._addHintParameters = function (
-        urlNavigate,
-    ) {
-        //If you don't use prompt=none, then if the session does not exist, there will be a failure.
+    _addHintParameters = function (urlNavigate) {
+        //If you dont use prompt=none, then if the session does not exist, there will be a failure.
         //If sid is sent alongside domain or login hints, there will be a failure since request is ambiguous.
         //If sid is sent with a prompt value other than none or attempt_none, there will be a failure since the request is ambiguous.
 
@@ -1218,7 +1043,7 @@ var AuthenticationContext = (function () {
      * Creates a user object by decoding the id_token
      * @ignore
      */
-    AuthenticationContext.prototype._createUser = function (idToken) {
+    _createUser(idToken) {
         var user = null
         var parsedJson = this._extractIdToken(idToken)
         if (parsedJson && parsedJson.hasOwnProperty("aud")) {
@@ -1248,7 +1073,7 @@ var AuthenticationContext = (function () {
      * Returns the anchor part(#) of the URL
      * @ignore
      */
-    AuthenticationContext.prototype._getHash = function (hash) {
+    _getHash(hash) {
         if (hash.indexOf("#/") > -1) {
             hash = hash.substring(hash.indexOf("#/") + 2)
         } else if (hash.indexOf("#") > -1) {
@@ -1263,13 +1088,13 @@ var AuthenticationContext = (function () {
      * @param {string} hash  -  Hash passed from redirect page
      * @returns {Boolean} true if response contains id_token, access_token or error, false otherwise.
      */
-    AuthenticationContext.prototype.isCallback = function (hash) {
+    isCallback(hash) {
         hash = this._getHash(hash)
         var parameters = this._deserialize(hash)
         return (
-            parameters.hasOwnProperty(this.CONSTANTS.ERROR_DESCRIPTION) ||
-            parameters.hasOwnProperty(this.CONSTANTS.ACCESS_TOKEN) ||
-            parameters.hasOwnProperty(this.CONSTANTS.ID_TOKEN)
+            parameters.hasOwnProperty(ERROR_DESCRIPTION) ||
+            parameters.hasOwnProperty(ACCESS_TOKEN) ||
+            parameters.hasOwnProperty(ID_TOKEN)
         )
     }
 
@@ -1277,8 +1102,8 @@ var AuthenticationContext = (function () {
      * Gets login error
      * @returns {string} error message related to login.
      */
-    AuthenticationContext.prototype.getLoginError = function () {
-        return this._getItem(this.CONSTANTS.STORAGE.LOGIN_ERROR)
+    getLoginError() {
+        return this._getItem(StorageKey.LOGIN_ERROR)
     }
 
     /**
@@ -1295,7 +1120,7 @@ var AuthenticationContext = (function () {
      * Creates a requestInfo object from the URL fragment and returns it.
      * @returns {RequestInfo} an object created from the redirect response from AAD comprising of the keys - parameters, requestType, stateMatch, stateResponse and valid.
      */
-    AuthenticationContext.prototype.getRequestInfo = function (hash) {
+    getRequestInfo(hash) {
         hash = this._getHash(hash)
         var parameters = this._deserialize(hash)
         var requestInfo = {
@@ -1303,15 +1128,15 @@ var AuthenticationContext = (function () {
             parameters: {},
             stateMatch: false,
             stateResponse: "",
-            requestType: this.REQUEST_TYPE.UNKNOWN,
+            requestType: RequestType.UNKNOWN,
         }
 
         if (parameters) {
             requestInfo.parameters = parameters
             if (
-                parameters.hasOwnProperty(this.CONSTANTS.ERROR_DESCRIPTION) ||
-                parameters.hasOwnProperty(this.CONSTANTS.ACCESS_TOKEN) ||
-                parameters.hasOwnProperty(this.CONSTANTS.ID_TOKEN)
+                parameters.hasOwnProperty(ERROR_DESCRIPTION) ||
+                parameters.hasOwnProperty(ACCESS_TOKEN) ||
+                parameters.hasOwnProperty(ID_TOKEN)
             ) {
                 requestInfo.valid = true
 
@@ -1357,11 +1182,11 @@ var AuthenticationContext = (function () {
      * Matches nonce from the request with the response.
      * @ignore
      */
-    AuthenticationContext.prototype._matchNonce = function (user) {
-        var requestNonce = this._getItem(this.CONSTANTS.STORAGE.NONCE_IDTOKEN)
+    _matchNonce(user) {
+        var requestNonce = this._getItem(StorageKey.NONCE_IDTOKEN)
 
         if (requestNonce) {
-            requestNonce = requestNonce.split(this.CONSTANTS.CACHE_DELIMETER)
+            requestNonce = requestNonce.split(CACHE_DELIMETER)
             for (var i = 0; i < requestNonce.length; i++) {
                 if (requestNonce[i] === user.profile.nonce) {
                     return true
@@ -1376,31 +1201,27 @@ var AuthenticationContext = (function () {
      * Matches state from the request with the response.
      * @ignore
      */
-    AuthenticationContext.prototype._matchState = function (requestInfo) {
-        var loginStates = this._getItem(this.CONSTANTS.STORAGE.STATE_LOGIN)
+    _matchState(requestInfo) {
+        var loginStates = this._getItem(StorageKey.STATE_LOGIN)
 
         if (loginStates) {
-            loginStates = loginStates.split(this.CONSTANTS.CACHE_DELIMETER)
+            loginStates = loginStates.split(CACHE_DELIMETER)
             for (var i = 0; i < loginStates.length; i++) {
                 if (loginStates[i] === requestInfo.stateResponse) {
-                    requestInfo.requestType = this.REQUEST_TYPE.LOGIN
+                    requestInfo.requestType = RequestType.LOGIN
                     requestInfo.stateMatch = true
                     return true
                 }
             }
         }
 
-        var acquireTokenStates = this._getItem(
-            this.CONSTANTS.STORAGE.STATE_RENEW,
-        )
+        var acquireTokenStates = this._getItem(StorageKey.STATE_RENEW)
 
         if (acquireTokenStates) {
-            acquireTokenStates = acquireTokenStates.split(
-                this.CONSTANTS.CACHE_DELIMETER,
-            )
+            acquireTokenStates = acquireTokenStates.split(CACHE_DELIMETER)
             for (var i = 0; i < acquireTokenStates.length; i++) {
                 if (acquireTokenStates[i] === requestInfo.stateResponse) {
-                    requestInfo.requestType = this.REQUEST_TYPE.RENEW_TOKEN
+                    requestInfo.requestType = RequestType.RENEW_TOKEN
                     requestInfo.stateMatch = true
                     return true
                 }
@@ -1414,7 +1235,7 @@ var AuthenticationContext = (function () {
      * Extracts resource value from state.
      * @ignore
      */
-    AuthenticationContext.prototype._getResourceFromState = function (state) {
+    _getResourceFromState(state) {
         if (state) {
             var splitIndex = state.indexOf("|")
 
@@ -1429,43 +1250,36 @@ var AuthenticationContext = (function () {
     /**
      * Saves token or error received in the response from AAD in the cache. In case of id_token, it also creates the user object.
      */
-    AuthenticationContext.prototype.saveTokenFromHash = function (requestInfo) {
+    saveTokenFromHash(requestInfo) {
         this.info(
             "State status:" +
                 requestInfo.stateMatch +
                 "; Request type:" +
                 requestInfo.requestType,
         )
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR, "")
-        this._saveItem(this.CONSTANTS.STORAGE.ERROR_DESCRIPTION, "")
+        this._saveItem(StorageKey.ERROR, "")
+        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
 
         var resource = this._getResourceFromState(requestInfo.stateResponse)
 
         // Record error
-        if (
-            requestInfo.parameters.hasOwnProperty(
-                this.CONSTANTS.ERROR_DESCRIPTION,
-            )
-        ) {
+        if (requestInfo.parameters.hasOwnProperty(ERROR_DESCRIPTION)) {
             this.infoPii(
                 "Error :" +
                     requestInfo.parameters.error +
                     "; Error description:" +
-                    requestInfo.parameters[this.CONSTANTS.ERROR_DESCRIPTION],
+                    requestInfo.parameters[ERROR_DESCRIPTION],
             )
+            this._saveItem(StorageKey.ERROR, requestInfo.parameters.error)
             this._saveItem(
-                this.CONSTANTS.STORAGE.ERROR,
-                requestInfo.parameters.error,
-            )
-            this._saveItem(
-                this.CONSTANTS.STORAGE.ERROR_DESCRIPTION,
-                requestInfo.parameters[this.CONSTANTS.ERROR_DESCRIPTION],
+                StorageKey.ERROR_DESCRIPTION,
+                requestInfo.parameters[ERROR_DESCRIPTION],
             )
 
-            if (requestInfo.requestType === this.REQUEST_TYPE.LOGIN) {
+            if (requestInfo.requestType === RequestType.LOGIN) {
                 this._loginInProgress = false
                 this._saveItem(
-                    this.CONSTANTS.STORAGE.LOGIN_ERROR,
+                    StorageKey.LOGIN_ERROR,
                     requestInfo.parameters.error_description,
                 )
             }
@@ -1474,102 +1288,79 @@ var AuthenticationContext = (function () {
             if (requestInfo.stateMatch) {
                 // record tokens to storage if exists
                 this.info("State is right")
-                if (
-                    requestInfo.parameters.hasOwnProperty(
-                        this.CONSTANTS.SESSION_STATE,
-                    )
-                ) {
+                if (requestInfo.parameters.hasOwnProperty(SESSION_STATE)) {
                     this._saveItem(
-                        this.CONSTANTS.STORAGE.SESSION_STATE,
-                        requestInfo.parameters[this.CONSTANTS.SESSION_STATE],
+                        StorageKey.SESSION_STATE,
+                        requestInfo.parameters[SESSION_STATE],
                     )
                 }
 
                 var keys
 
-                if (
-                    requestInfo.parameters.hasOwnProperty(
-                        this.CONSTANTS.ACCESS_TOKEN,
-                    )
-                ) {
+                if (requestInfo.parameters.hasOwnProperty(ACCESS_TOKEN)) {
                     this.info("Fragment has access token")
 
                     if (!this._hasResource(resource)) {
-                        keys =
-                            this._getItem(this.CONSTANTS.STORAGE.TOKEN_KEYS) ||
-                            ""
+                        keys = this._getItem(StorageKey.TOKEN_KEYS) || ""
                         this._saveItem(
-                            this.CONSTANTS.STORAGE.TOKEN_KEYS,
-                            keys + resource + this.CONSTANTS.RESOURCE_DELIMETER,
+                            StorageKey.TOKEN_KEYS,
+                            keys + resource + RESOURCE_DELIMETER,
                         )
                     }
 
                     // save token with related resource
                     this._saveItem(
-                        this.CONSTANTS.STORAGE.ACCESS_TOKEN_KEY + resource,
-                        requestInfo.parameters[this.CONSTANTS.ACCESS_TOKEN],
+                        StorageKey.ACCESS_TOKEN_KEY + resource ,
+                        requestInfo.parameters[ACCESS_TOKEN],
                     )
                     this._saveItem(
-                        this.CONSTANTS.STORAGE.EXPIRATION_KEY + resource,
-                        this._expiresIn(
-                            requestInfo.parameters[this.CONSTANTS.EXPIRES_IN],
-                        ),
+                        StorageKey.EXPIRATION_KEY + resource ,
+                        this._expiresIn(requestInfo.parameters[EXPIRES_IN]),
                     )
                 }
 
-                if (
-                    requestInfo.parameters.hasOwnProperty(
-                        this.CONSTANTS.ID_TOKEN,
-                    )
-                ) {
+                if (requestInfo.parameters.hasOwnProperty(ID_TOKEN)) {
                     this.info("Fragment has id token")
                     this._loginInProgress = false
                     this._user = this._createUser(
-                        requestInfo.parameters[this.CONSTANTS.ID_TOKEN],
+                        requestInfo.parameters[ID_TOKEN],
                     )
                     if (this._user && this._user.profile) {
                         if (!this._matchNonce(this._user)) {
                             this._saveItem(
-                                this.CONSTANTS.STORAGE.LOGIN_ERROR,
+                                StorageKey.LOGIN_ERROR,
                                 "Nonce received: " +
                                     this._user.profile.nonce +
                                     " is not same as requested: " +
-                                    this._getItem(
-                                        this.CONSTANTS.STORAGE.NONCE_IDTOKEN,
-                                    ),
+                                    this._getItem(StorageKey.NONCE_IDTOKEN),
                             )
                             this._user = null
                         } else {
                             this._saveItem(
-                                this.CONSTANTS.STORAGE.IDTOKEN,
-                                requestInfo.parameters[this.CONSTANTS.ID_TOKEN],
+                                StorageKey.IDTOKEN,
+                                requestInfo.parameters[ID_TOKEN],
                             )
+
                             // Save idtoken as access token for app itself
-                            var idTokenResource = this.config.loginResource
+                            resource = this.config.loginResource
                                 ? this.config.loginResource
                                 : this.config.clientId
 
-                            if (!this._hasResource(idTokenResource)) {
+                            if (!this._hasResource(resource)) {
                                 keys =
-                                    this._getItem(
-                                        this.CONSTANTS.STORAGE.TOKEN_KEYS,
-                                    ) || ""
+                                    this._getItem(StorageKey.TOKEN_KEYS) || ""
                                 this._saveItem(
-                                    this.CONSTANTS.STORAGE.TOKEN_KEYS,
-                                    keys +
-                                        idTokenResource +
-                                        this.CONSTANTS.RESOURCE_DELIMETER,
+                                    StorageKey.TOKEN_KEYS,
+                                    keys + resource + RESOURCE_DELIMETER,
                                 )
                             }
 
                             this._saveItem(
-                                this.CONSTANTS.STORAGE.ACCESS_TOKEN_KEY +
-                                    idTokenResource,
-                                requestInfo.parameters[this.CONSTANTS.ID_TOKEN],
+                                StorageKey.ACCESS_TOKEN_KEY + resource ,
+                                requestInfo.parameters[ID_TOKEN],
                             )
                             this._saveItem(
-                                this.CONSTANTS.STORAGE.EXPIRATION_KEY +
-                                    idTokenResource,
+                                StorageKey.EXPIRATION_KEY + resource ,
                                 this._user.profile.exp,
                             )
                         }
@@ -1577,15 +1368,12 @@ var AuthenticationContext = (function () {
                         requestInfo.parameters["error"] = "invalid id_token"
                         requestInfo.parameters["error_description"] =
                             "Invalid id_token. id_token: " +
-                            requestInfo.parameters[this.CONSTANTS.ID_TOKEN]
+                            requestInfo.parameters[ID_TOKEN]
+                        this._saveItem(StorageKey.ERROR, "invalid id_token")
                         this._saveItem(
-                            this.CONSTANTS.STORAGE.ERROR,
-                            "invalid id_token",
-                        )
-                        this._saveItem(
-                            this.CONSTANTS.STORAGE.ERROR_DESCRIPTION,
+                            StorageKey.ERROR_DESCRIPTION,
                             "Invalid id_token. id_token: " +
-                                requestInfo.parameters[this.CONSTANTS.ID_TOKEN],
+                                requestInfo.parameters[ID_TOKEN],
                         )
                     }
                 }
@@ -1593,17 +1381,17 @@ var AuthenticationContext = (function () {
                 requestInfo.parameters["error"] = "Invalid_state"
                 requestInfo.parameters["error_description"] =
                     "Invalid_state. state: " + requestInfo.stateResponse
-                this._saveItem(this.CONSTANTS.STORAGE.ERROR, "Invalid_state")
+                this._saveItem(StorageKey.ERROR, "Invalid_state")
                 this._saveItem(
-                    this.CONSTANTS.STORAGE.ERROR_DESCRIPTION,
+                    StorageKey.ERROR_DESCRIPTION,
                     "Invalid_state. state: " + requestInfo.stateResponse,
                 )
             }
         }
 
         this._saveItem(
-            this.CONSTANTS.STORAGE.RENEW_STATUS + resource,
-            this.CONSTANTS.TOKEN_RENEW_STATUS_COMPLETED,
+            StorageKey.RENEW_STATUS + resource ,
+            TokenRenewStatus.COMPLETED,
         )
     }
 
@@ -1612,9 +1400,7 @@ var AuthenticationContext = (function () {
      * @param {string} endpoint  -  The URI for which the resource Id is requested.
      * @returns {string} resource for this API endpoint.
      */
-    AuthenticationContext.prototype.getResourceForEndpoint = function (
-        endpoint,
-    ) {
+    getResourceForEndpoint(endpoint: string) {
         // if user specified list of anonymous endpoints, no need to send token to these endpoints, return null.
         if (this.config && this.config.anonymousEndpoints) {
             for (var i = 0; i < this.config.anonymousEndpoints.length; i++) {
@@ -1660,7 +1446,7 @@ var AuthenticationContext = (function () {
      * Strips the protocol part of the URL and returns it.
      * @ignore
      */
-    AuthenticationContext.prototype._getHostFromUri = function (uri) {
+    _getHostFromUri(uri: string) {
         // remove http:// or https:// from uri
         var extractedUri = String(uri).replace(/^(https?:)\/\//, "")
         extractedUri = extractedUri.split("/")[0]
@@ -1671,7 +1457,7 @@ var AuthenticationContext = (function () {
      * This method must be called for processing the response received from AAD. It extracts the hash, processes the token or error, saves it in the cache and calls the registered callbacks with the result.
      * @param {string} [hash=window.location.hash] - Hash fragment of Url.
      */
-    AuthenticationContext.prototype.handleWindowCallback = function (hash) {
+    handleWindowCallback(hash: string) {
         // This is for regular javascript usage for redirect handling
         // need to make sure this is for callback
         if (hash == null) {
@@ -1679,7 +1465,7 @@ var AuthenticationContext = (function () {
         }
 
         if (this.isCallback(hash)) {
-            var self = null
+            var self: Adal = null as any
             var isPopup = false
 
             if (
@@ -1691,7 +1477,10 @@ var AuthenticationContext = (function () {
                 self = this._openedWindows[this._openedWindows.length - 1]
                     .opener._adalInstance
                 isPopup = true
-            } else if (window.parent && window.parent._adalInstance) {
+            }
+            // @ts-ignore
+            else if (window.parent && window.parent._adalInstance) {
+                // @ts-ignore
                 self = window.parent._adalInstance
             }
 
@@ -1704,14 +1493,14 @@ var AuthenticationContext = (function () {
                 tokenReceivedCallback =
                     self._callBackMappedToRenewStates[requestInfo.stateResponse]
             } else {
-                tokenReceivedCallback = self.callback
+                tokenReceivedCallback = self.config.callback
             }
 
             self.info("Returned from redirect url")
             self.saveTokenFromHash(requestInfo)
 
             if (
-                requestInfo.requestType === this.REQUEST_TYPE.RENEW_TOKEN &&
+                requestInfo.requestType === RequestType.RENEW_TOKEN &&
                 window.parent
             ) {
                 if (window.parent !== window) {
@@ -1723,17 +1512,16 @@ var AuthenticationContext = (function () {
                 }
 
                 token =
-                    requestInfo.parameters[self.CONSTANTS.ACCESS_TOKEN] ||
-                    requestInfo.parameters[self.CONSTANTS.ID_TOKEN]
-                tokenType = self.CONSTANTS.ACCESS_TOKEN
-            } else if (requestInfo.requestType === this.REQUEST_TYPE.LOGIN) {
-                token = requestInfo.parameters[self.CONSTANTS.ID_TOKEN]
-                tokenType = self.CONSTANTS.ID_TOKEN
+                    requestInfo.parameters[ACCESS_TOKEN] ||
+                    requestInfo.parameters[ID_TOKEN]
+                tokenType = ACCESS_TOKEN
+            } else if (requestInfo.requestType === RequestType.LOGIN) {
+                token = requestInfo.parameters[ID_TOKEN]
+                tokenType = ID_TOKEN
             }
 
-            var errorDesc =
-                requestInfo.parameters[self.CONSTANTS.ERROR_DESCRIPTION]
-            var error = requestInfo.parameters[self.CONSTANTS.ERROR]
+            var errorDesc = requestInfo.parameters[ERROR_DESCRIPTION]
+            var error = requestInfo.parameters[ERROR]
             try {
                 if (tokenReceivedCallback) {
                     tokenReceivedCallback(errorDesc, token, error, tokenType)
@@ -1747,7 +1535,7 @@ var AuthenticationContext = (function () {
             if (window.parent === window && !isPopup) {
                 if (self.config.navigateToLoginRequestUrl) {
                     window.location.href = self._getItem(
-                        self.CONSTANTS.STORAGE.LOGIN_REQUEST,
+                        StorageKey.LOGIN_REQUEST,
                     )
                 } else window.location.hash = ""
             }
@@ -1758,17 +1546,14 @@ var AuthenticationContext = (function () {
      * Constructs the authorization endpoint URL and returns it.
      * @ignore
      */
-    AuthenticationContext.prototype._getNavigateUrl = function (
-        responseType,
-        resource,
-    ) {
+    _getNavigateUrl(responseType: string, resource?: string | null) {
         var tenant = "common"
         if (this.config.tenant) {
             tenant = this.config.tenant
         }
 
         var urlNavigate =
-            this.instance +
+            this.config.instance +
             tenant +
             "/oauth2/authorize" +
             this._serialize(responseType, this.config, resource) +
@@ -1781,9 +1566,7 @@ var AuthenticationContext = (function () {
      * Returns the decoded id_token.
      * @ignore
      */
-    AuthenticationContext.prototype._extractIdToken = function (
-        encodedIdToken,
-    ) {
+    _extractIdToken(encodedIdToken: string) {
         // id token will be decoded to get the username
         var decodedToken = this._decodeJwt(encodedIdToken)
 
@@ -1815,9 +1598,7 @@ var AuthenticationContext = (function () {
      * Decodes a string of data which has been encoded using base-64 encoding.
      * @ignore
      */
-    AuthenticationContext.prototype._base64DecodeStringUrlSafe = function (
-        base64IdToken,
-    ) {
+    _base64DecodeStringUrlSafe(base64IdToken: string) {
         // html5 should support atob function for decoding
         base64IdToken = base64IdToken.replace(/-/g, "+").replace(/_/g, "/")
 
@@ -1829,7 +1610,7 @@ var AuthenticationContext = (function () {
     }
 
     //Take https://cdnjs.cloudflare.com/ajax/libs/Base64/0.3.0/base64.js and https://en.wikipedia.org/wiki/Base64 as reference.
-    AuthenticationContext.prototype._decode = function (base64IdToken) {
+    _decode(base64IdToken: string) {
         var codes =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
         base64IdToken = String(base64IdToken).replace(/=+$/, "")
@@ -1892,7 +1673,7 @@ var AuthenticationContext = (function () {
      * @ignore
      */
     // Adal.node js crack function
-    AuthenticationContext.prototype._decodeJwt = function (jwtToken) {
+    _decodeJwt(jwtToken: string) {
         if (this._isEmpty(jwtToken)) {
             return null
         }
@@ -1919,9 +1700,7 @@ var AuthenticationContext = (function () {
      * Converts string to represent binary data in ASCII string format by translating it into a radix-64 representation and returns it
      * @ignore
      */
-    AuthenticationContext.prototype._convertUrlSafeToRegularBase64EncodedString = function (
-        str,
-    ) {
+    _convertUrlSafeToRegularBase64EncodedString(str: string) {
         return str.replace("-", "+").replace("_", "/")
     }
 
@@ -1929,12 +1708,8 @@ var AuthenticationContext = (function () {
      * Serializes the parameters for the authorization endpoint URL and returns the serialized uri string.
      * @ignore
      */
-    AuthenticationContext.prototype._serialize = function (
-        responseType,
-        obj,
-        resource,
-    ) {
-        var str = []
+    _serialize(responseType: string, obj: any, resource?: string) {
+        var str: string[] = []
 
         if (obj !== null) {
             str.push("?response_type=" + responseType)
@@ -1967,7 +1742,7 @@ var AuthenticationContext = (function () {
      * Parses the query string parameters into a key-value pair object.
      * @ignore
      */
-    AuthenticationContext.prototype._deserialize = function (query) {
+    _deserialize(query: string) {
         var match,
             pl = /\+/g, // Regex for replacing addition symbol with a space
             search = /([^&=]+)=([^&]*)/g,
@@ -1989,7 +1764,7 @@ var AuthenticationContext = (function () {
      * Converts decimal value to hex equivalent
      * @ignore
      */
-    AuthenticationContext.prototype._decimalToHex = function (number) {
+    _decimalToHex(number: number) {
         var hex = number.toString(16)
 
         while (hex.length < 2) {
@@ -2002,8 +1777,7 @@ var AuthenticationContext = (function () {
      * Generates RFC4122 version 4 guid (128 bits)
      * @ignore
      */
-    /* jshint ignore:start */
-    AuthenticationContext.prototype._guid = function () {
+    _guid() {
         // RFC4122: The version 4 UUID is meant for generating UUIDs from truly-random or
         // pseudo-random numbers.
         // The algorithm is as follows:
@@ -2024,6 +1798,7 @@ var AuthenticationContext = (function () {
         // Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
         // y could be 1000, 1001, 1010, 1011 since most significant two bits needs to be 10
         // y values are 8, 9, A, B
+        // @ts-expect-error
         var cryptoObj = window.crypto || window.msCrypto // for IE 11
         if (cryptoObj && cryptoObj.getRandomValues) {
             var buffer = new Uint8Array(16)
@@ -2080,23 +1855,18 @@ var AuthenticationContext = (function () {
             return guidResponse
         }
     }
-    /* jshint ignore:end */
 
     /**
      * Calculates the expires in value in milliseconds for the acquired token
      * @ignore
      */
-    AuthenticationContext.prototype._expiresIn = function (expires) {
+    _expiresIn(expires: any) {
         // if AAD did not send "expires_in" property, use default expiration of 3599 seconds, for some reason AAD sends 3599 as "expires_in" value instead of 3600
         if (!expires) expires = 3599
         return this._now() + parseInt(expires, 10)
     }
 
-    /**
-     * Return the number of milliseconds since 1970/01/01
-     * @ignore
-     */
-    AuthenticationContext.prototype._now = function () {
+    _now() {
         return Math.round(new Date().getTime() / 1000.0)
     }
 
@@ -2104,7 +1874,7 @@ var AuthenticationContext = (function () {
      * Adds the hidden iframe for silent token renewal
      * @ignore
      */
-    AuthenticationContext.prototype._addAdalFrame = function (iframeId) {
+    _addAdalFrame(iframeId: string) {
         if (typeof iframeId === "undefined") {
             return
         }
@@ -2116,21 +1886,21 @@ var AuthenticationContext = (function () {
             if (
                 document.createElement &&
                 document.documentElement &&
-                (window.opera ||
+                (window["opera"] ||
                     window.navigator.userAgent.indexOf("MSIE 5.0") === -1)
             ) {
-                var ifr = document.createElement("iframe")
+                var ifr = document.createElement("iframe") as any
                 ifr.setAttribute("id", iframeId)
                 ifr.setAttribute("aria-hidden", "true")
                 ifr.style.visibility = "hidden"
                 ifr.style.position = "absolute"
-                ifr.style.width = ifr.style.height = ifr.style.borderWidth =
-                    "0px"
+                ifr.style.width = ifr.style.height = ifr.borderWidth = "0px"
 
                 adalFrame = document
                     .getElementsByTagName("body")[0]
                     .appendChild(ifr)
             } else if (document.body && document.body.insertAdjacentHTML) {
+                // @ts-ignore
                 document.body.insertAdjacentHTML(
                     "beforeEnd",
                     '<iframe name="' +
@@ -2152,7 +1922,7 @@ var AuthenticationContext = (function () {
      * Saves the key-value pair in the cache
      * @ignore
      */
-    AuthenticationContext.prototype._saveItem = function (key, obj, preserve) {
+    _saveItem(key: string, obj: any, preserve = false) {
         if (
             this.config &&
             this.config.cacheLocation &&
@@ -2165,10 +1935,7 @@ var AuthenticationContext = (function () {
 
             if (preserve) {
                 var value = this._getItem(key) || ""
-                localStorage.setItem(
-                    key,
-                    value + obj + this.CONSTANTS.CACHE_DELIMETER,
-                )
+                localStorage.setItem(key, value + obj + CACHE_DELIMETER)
             } else {
                 localStorage.setItem(key, obj)
             }
@@ -2190,7 +1957,7 @@ var AuthenticationContext = (function () {
      * Searches the value for the given key in the cache
      * @ignore
      */
-    AuthenticationContext.prototype._getItem = function (key) {
+    _getItem(key: string): any {
         if (
             this.config &&
             this.config.cacheLocation &&
@@ -2214,59 +1981,45 @@ var AuthenticationContext = (function () {
     }
 
     /**
-     * Returns true if the browser supports given storage type
-     * @ignore
-     */
-    AuthenticationContext.prototype._supportsStorage = function (storageType) {
-        if (!(storageType in this._storageSupport)) {
-            return false
-        }
-
-        if (this._storageSupport[storageType] !== null) {
-            return this._storageSupport[storageType]
-        }
-
-        try {
-            if (!(storageType in window) || window[storageType] === null) {
-                throw new Error()
-            }
-            var testKey = "__storageTest__"
-            window[storageType].setItem(testKey, "A")
-            if (window[storageType].getItem(testKey) !== "A") {
-                throw new Error()
-            }
-            window[storageType].removeItem(testKey)
-            if (window[storageType].getItem(testKey)) {
-                throw new Error()
-            }
-            this._storageSupport[storageType] = true
-        } catch (e) {
-            this._storageSupport[storageType] = false
-        }
-        return this._storageSupport[storageType]
-    }
-
-    /**
      * Returns true if browser supports localStorage, false otherwise.
      * @ignore
      */
-    AuthenticationContext.prototype._supportsLocalStorage = function () {
-        return this._supportsStorage("localStorage")
+    _supportsLocalStorage() {
+        try {
+            if (!window.localStorage) return false // Test availability
+            window.localStorage.setItem("storageTest", "A") // Try write
+            if (window.localStorage.getItem("storageTest") != "A") return false // Test read/write
+            window.localStorage.removeItem("storageTest") // Try delete
+            if (window.localStorage.getItem("storageTest")) return false // Test delete
+            return true // Success
+        } catch (e) {
+            return false
+        }
     }
 
     /**
      * Returns true if browser supports sessionStorage, false otherwise.
      * @ignore
      */
-    AuthenticationContext.prototype._supportsSessionStorage = function () {
-        return this._supportsStorage("sessionStorage")
+    _supportsSessionStorage() {
+        try {
+            if (!window.sessionStorage) return false // Test availability
+            window.sessionStorage.setItem("storageTest", "A") // Try write
+            if (window.sessionStorage.getItem("storageTest") != "A")
+                return false // Test read/write
+            window.sessionStorage.removeItem("storageTest") // Try delete
+            if (window.sessionStorage.getItem("storageTest")) return false // Test delete
+            return true // Success
+        } catch (e) {
+            return false
+        }
     }
 
     /**
      * Returns a cloned copy of the passed object.
      * @ignore
      */
-    AuthenticationContext.prototype._cloneConfig = function (obj) {
+    _cloneConfig(obj: any) {
         if (null === obj || "object" !== typeof obj) {
             return obj
         }
@@ -2284,9 +2037,7 @@ var AuthenticationContext = (function () {
      * Adds the library version and returns it.
      * @ignore
      */
-    AuthenticationContext.prototype._addLibMetadata = function () {
-        // x-client-SKU
-        // x-client-Ver
+    _addLibMetadata() {
         return "&x-client-SKU=Js&x-client-Ver=" + this._libVersion()
     }
 
@@ -2296,15 +2047,16 @@ var AuthenticationContext = (function () {
      * @param {string} message  -  Message to log.
      * @param {string} error  -  Error to log.
      */
-    AuthenticationContext.prototype.log = function (
-        level,
-        message,
-        error,
-        containsPii,
+    log(
+        level: LogLevel,
+        message: string,
+        error: Error | string | null,
+        containsPii = false,
     ) {
-        if (level <= Logging.level) {
-            if (!Logging.piiLoggingEnabled && containsPii) return
+        if (!this.piiLoggingEnabled && containsPii) return
 
+        // @ts-ignore
+        if (level <= Adal.logLevel) {
             var timestamp = new Date().toUTCString()
             var formattedMessage = ""
 
@@ -2316,7 +2068,7 @@ var AuthenticationContext = (function () {
                     "-" +
                     this._libVersion() +
                     "-" +
-                    this.CONSTANTS.LEVEL_STRING_MAP[level] +
+                    LOG_LEVEL_LABELS[level] +
                     " " +
                     message
             else
@@ -2325,15 +2077,15 @@ var AuthenticationContext = (function () {
                     ":" +
                     this._libVersion() +
                     "-" +
-                    this.CONSTANTS.LEVEL_STRING_MAP[level] +
+                    LOG_LEVEL_LABELS[level] +
                     " " +
                     message
 
             if (error) {
-                formattedMessage += "\nstack:\n" + error.stack
+                formattedMessage += "\nstack:\n" + (error as Error).stack
             }
 
-            Logging.log(formattedMessage)
+            console.log(formattedMessage)
         }
     }
 
@@ -2342,32 +2094,32 @@ var AuthenticationContext = (function () {
      * @param {string} message  -  Message to log.
      * @param {string} error  -  Error to log.
      */
-    AuthenticationContext.prototype.error = function (message, error) {
-        this.log(this.CONSTANTS.LOGGING_LEVEL.ERROR, message, error)
+    error(message: string, error: Error) {
+        this.log(LogLevel.Error, message, error)
     }
 
     /**
      * Logs messages when Logging Level is set to 1.
      * @param {string} message  -  Message to log.
      */
-    AuthenticationContext.prototype.warn = function (message) {
-        this.log(this.CONSTANTS.LOGGING_LEVEL.WARN, message, null)
+    warn(message: string) {
+        this.log(LogLevel.Warn, message, null)
     }
 
     /**
      * Logs messages when Logging Level is set to 2.
      * @param {string} message  -  Message to log.
      */
-    AuthenticationContext.prototype.info = function (message) {
-        this.log(this.CONSTANTS.LOGGING_LEVEL.INFO, message, null)
+    info(message: string) {
+        this.log(LogLevel.Info, message, null)
     }
 
     /**
      * Logs messages when Logging Level is set to 3.
      * @param {string} message  -  Message to log.
      */
-    AuthenticationContext.prototype.verbose = function (message) {
-        this.log(this.CONSTANTS.LOGGING_LEVEL.VERBOSE, message, null)
+    verbose(message: string) {
+        this.log(LogLevel.Verbose, message, null)
     }
 
     /**
@@ -2375,51 +2127,39 @@ var AuthenticationContext = (function () {
      * @param {string} message  -  Message to log.
      * @param {string} error  -  Error to log.
      */
-    AuthenticationContext.prototype.errorPii = function (message, error) {
-        this.log(this.CONSTANTS.LOGGING_LEVEL.ERROR, message, error, true)
+    errorPii(message: string, error: string) {
+        this.log(LogLevel.Error, message, error, true)
     }
 
     /**
      * Logs  Pii messages when Logging Level is set to 1 and window.piiLoggingEnabled is set to true.
      * @param {string} message  -  Message to log.
      */
-    AuthenticationContext.prototype.warnPii = function (message) {
-        this.log(this.CONSTANTS.LOGGING_LEVEL.WARN, message, null, true)
+    warnPii(message: string) {
+        this.log(LogLevel.Warn, message, null, true)
     }
 
     /**
      * Logs messages when Logging Level is set to 2 and window.piiLoggingEnabled is set to true.
      * @param {string} message  -  Message to log.
      */
-    AuthenticationContext.prototype.infoPii = function (message) {
-        this.log(this.CONSTANTS.LOGGING_LEVEL.INFO, message, null, true)
+    infoPii(message: string) {
+        this.log(LogLevel.Info, message, null, true)
     }
 
     /**
      * Logs messages when Logging Level is set to 3 and window.piiLoggingEnabled is set to true.
      * @param {string} message  -  Message to log.
      */
-    AuthenticationContext.prototype.verbosePii = function (message) {
-        this.log(this.CONSTANTS.LOGGING_LEVEL.VERBOSE, message, null, true)
+    verbosePii(message: string) {
+        this.log(LogLevel.Verbose, message, null, true)
     }
+
     /**
      * Returns the library version.
      * @ignore
      */
-    AuthenticationContext.prototype._libVersion = function () {
-        return "1.0.18"
+    _libVersion() {
+        return VERSION
     }
-
-    /**
-     * Returns a reference of Authentication Context as a result of a require call.
-     * @ignore
-     */
-    if (typeof module !== "undefined" && module.exports) {
-        module.exports = AuthenticationContext
-        module.exports.inject = function (conf) {
-            return new AuthenticationContext(conf)
-        }
-    }
-
-    return AuthenticationContext
-})()
+}
