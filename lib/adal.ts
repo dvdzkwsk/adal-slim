@@ -16,31 +16,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //----------------------------------------------------------------------
-const VERSION = "1.0.17",
-    ACCESS_TOKEN = "access_token",
-    EXPIRES_IN = "expires_in",
-    ID_TOKEN = "id_token",
-    ERROR = "error",
-    ERROR_DESCRIPTION = "error_description",
-    SESSION_STATE = "session_state",
-    RESOURCE_DELIMETER = "|",
-    CACHE_DELIMETER = "||",
-    POPUP_WIDTH = 483,
-    POPUP_HEIGHT = 600
-
-export enum LogLevel {
-    Error = 0,
-    Warn,
-    Info,
-    Verbose,
-}
-const LOG_LEVEL_LABELS = {
-    [LogLevel.Error]: "ERROR:",
-    [LogLevel.Warn]: "WARNING:",
-    [LogLevel.Info]: "INFO:",
-    [LogLevel.Verbose]: "VERBOSE:",
-}
-
 enum RequestType {
     LOGIN = "LOGIN",
     RENEW_TOKEN = "RENEW_TOKEN",
@@ -73,6 +48,32 @@ enum TokenRenewStatus {
     Canceled = "Canceled",
     Completed = "Completed",
     InProgress = "In Progress",
+}
+
+const VERSION = "1.0.17",
+    ACCESS_TOKEN = "access_token",
+    EXPIRES_IN = "expires_in",
+    ID_TOKEN = "id_token",
+    ERROR = "error",
+    ERROR_DESCRIPTION = "error_description",
+    SESSION_STATE = "session_state",
+    RESOURCE_DELIMETER = "|",
+    CACHE_DELIMETER = "||",
+    POPUP_WIDTH = 483,
+    POPUP_HEIGHT = 600,
+    STORAGE = detectStorage()
+
+export enum LogLevel {
+    Error = 0,
+    Warn,
+    Info,
+    Verbose,
+}
+const LOG_LEVEL_LABELS = {
+    [LogLevel.Error]: "ERROR:",
+    [LogLevel.Warn]: "WARNING:",
+    [LogLevel.Info]: "INFO:",
+    [LogLevel.Verbose]: "VERBOSE:",
 }
 
 type Config = any
@@ -128,23 +129,23 @@ export class Adal {
         var expectedState = this._guid()
         this.config.state = expectedState
         this._idTokenNonce = this._guid()
-        var loginStartPage = this._getItem(StorageKey.ANGULAR_LOGIN_REQUEST)
+        var loginStartPage = getItem(StorageKey.ANGULAR_LOGIN_REQUEST)
 
         if (!loginStartPage || loginStartPage === "") {
             loginStartPage = window.location.href
         } else {
-            this._saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
+            saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
         }
 
         this.verbose(
             "Expected state: " + expectedState + " startPage:" + loginStartPage,
         )
-        this._saveItem(StorageKey.LOGIN_REQUEST, loginStartPage)
-        this._saveItem(StorageKey.LOGIN_ERROR, "")
-        this._saveItem(StorageKey.STATE_LOGIN, expectedState, true)
-        this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
-        this._saveItem(StorageKey.ERROR, "")
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
+        saveItem(StorageKey.LOGIN_REQUEST, loginStartPage)
+        saveItem(StorageKey.LOGIN_ERROR, "")
+        saveItem(StorageKey.STATE_LOGIN, expectedState, true)
+        saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
+        saveItem(StorageKey.ERROR, "")
+        saveItem(StorageKey.ERROR_DESCRIPTION, "")
         var urlNavigate =
             this._getNavigateUrl("id_token", null) +
             "&nonce=" +
@@ -154,7 +155,7 @@ export class Adal {
             // User defined way of handling the navigation
             this.config.displayCall(urlNavigate)
         } else if (this.config.popUp) {
-            this._saveItem(StorageKey.STATE_LOGIN, "") // so requestInfo does not match redirect case
+            saveItem(StorageKey.STATE_LOGIN, "") // so requestInfo does not match redirect case
             this._renewStates.push(expectedState)
             this.registerCallback(
                 expectedState,
@@ -233,9 +234,9 @@ export class Adal {
         loginError: string,
     ) {
         this.warn(errorDesc)
-        this._saveItem(StorageKey.ERROR, error)
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, errorDesc)
-        this._saveItem(StorageKey.LOGIN_ERROR, loginError)
+        saveItem(StorageKey.ERROR, error)
+        saveItem(StorageKey.ERROR_DESCRIPTION, errorDesc)
+        saveItem(StorageKey.LOGIN_ERROR, loginError)
 
         if (resource && this._activeRenewals[resource]) {
             this._activeRenewals[resource] = null
@@ -312,7 +313,7 @@ export class Adal {
                         encodeURI(registeredRedirectUri),
                     ) != -1
                 ) {
-                        this.handleWindowCallback(popUpWindowLocation.hash)
+                    this.handleWindowCallback(popUpWindowLocation.hash)
 
                     window.clearInterval(pollTimer)
                     this._loginInProgress = false
@@ -336,13 +337,8 @@ export class Adal {
      * @returns {Boolean} 'true' if login is in progress, else returns 'false'.
      */
     _hasResource(key) {
-        var keys = this._getItem(StorageKey.TOKEN_KEYS)
-        // @ts-expect-error
-        return (
-            keys &&
-            !this._isEmpty(keys) &&
-            keys.indexOf(key + RESOURCE_DELIMETER) > -1
-        )
+        var keys = getItem(StorageKey.TOKEN_KEYS)
+        return !isEmpty(keys) && keys.indexOf(key + RESOURCE_DELIMETER) > -1
     }
 
     /**
@@ -355,18 +351,17 @@ export class Adal {
             return null
         }
 
-        var token = this._getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
-        var expiry = this._getItem(StorageKey.EXPIRATION_KEY + resource)
+        var token = getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
+        var expiry = getItem(StorageKey.EXPIRATION_KEY + resource)
 
         // If expiration is within offset, it will force renew
         var offset = this.config.expireOffsetSeconds || 300
 
-        // @ts-expect-error
-        if (expiry && expiry > this._now() + offset) {
+        if (expiry && expiry > now() + offset) {
             return token
         } else {
-            this._saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
-            this._saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
+            saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
+            saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
             return null
         }
     }
@@ -387,7 +382,7 @@ export class Adal {
             return this._user
         }
 
-        var idtoken = this._getItem(StorageKey.IDTOKEN)
+        var idtoken = getItem(StorageKey.IDTOKEN)
         this._user = this._createUser(idtoken)
         return this._user
     }
@@ -467,7 +462,7 @@ export class Adal {
 
         if (responseType === ResponseType.ID_TOKEN) {
             this._idTokenNonce = this._guid()
-            this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
+            saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
             urlNavigate += "&nonce=" + encodeURIComponent(this._idTokenNonce)
         }
 
@@ -494,7 +489,7 @@ export class Adal {
         var frameHandle = this._addAdalFrame("adalIdTokenFrame")
         var expectedState = this._guid() + "|" + this.config.clientId
         this._idTokenNonce = this._guid()
-        this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
+        saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
         this.config.state = expectedState
         // renew happens in iframe, so it keeps javascript context
         this._renewStates.push(expectedState)
@@ -559,7 +554,7 @@ export class Adal {
     _loadFrameTimeout = function (urlNavigation, frameName, resource) {
         //set iframe session to pending
         this.verbose("Set loading state to pending for: " + resource)
-        this._saveItem(
+        saveItem(
             StorageKey.RENEW_STATUS + resource,
             TokenRenewStatus.InProgress,
         )
@@ -567,9 +562,8 @@ export class Adal {
 
         setTimeout(() => {
             if (
-                this._getItem(
-                    StorageKey.RENEW_STATUS + resource,
-                ) === TokenRenewStatus.InProgress
+                getItem(StorageKey.RENEW_STATUS + resource) ===
+                TokenRenewStatus.InProgress
             ) {
                 // fail the iframe session if it's in pending state
                 this.verbose(
@@ -591,7 +585,7 @@ export class Adal {
                     )
                 }
 
-                this._saveItem(
+                saveItem(
                     StorageKey.RENEW_STATUS + resource,
                     TokenRenewStatus.Canceled,
                 )
@@ -629,7 +623,7 @@ export class Adal {
      * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
      */
     acquireToken(resource, callback) {
-        if (this._isEmpty(resource)) {
+        if (isEmpty(resource)) {
             this.warn("resource is required")
             callback("resource is required", null, "resource is required")
             return
@@ -695,7 +689,7 @@ export class Adal {
      * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
      */
     acquireTokenPopup(resource, extraQueryParameters, claims, callback) {
-        if (this._isEmpty(resource)) {
+        if (isEmpty(resource)) {
             this.warn("resource is required")
             callback("resource is required", null, "resource is required")
             return
@@ -757,7 +751,7 @@ export class Adal {
     acquireTokenRedirect(resource, extraQueryParameters, claims) {
         const {callback} = this.config
 
-        if (this._isEmpty(resource)) {
+        if (isEmpty(resource)) {
             this.warn("resource is required")
             callback("resource is required", null, "resource is required")
             return
@@ -804,8 +798,8 @@ export class Adal {
         this.info(
             "acquireToken interactive is called for the resource " + resource,
         )
-        this._saveItem(StorageKey.LOGIN_REQUEST, window.location.href)
-        this._saveItem(StorageKey.STATE_RENEW, expectedState, true)
+        saveItem(StorageKey.LOGIN_REQUEST, window.location.href)
+        saveItem(StorageKey.STATE_RENEW, expectedState, true)
         this.promptUser(urlNavigate)
     }
 
@@ -826,29 +820,29 @@ export class Adal {
      * Clears cache items.
      */
     clearCache() {
-        this._saveItem(StorageKey.LOGIN_REQUEST, "")
-        this._saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
-        this._saveItem(StorageKey.SESSION_STATE, "")
-        this._saveItem(StorageKey.STATE_LOGIN, "")
-        this._saveItem(StorageKey.STATE_RENEW, "")
+        saveItem(StorageKey.LOGIN_REQUEST, "")
+        saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
+        saveItem(StorageKey.SESSION_STATE, "")
+        saveItem(StorageKey.STATE_LOGIN, "")
+        saveItem(StorageKey.STATE_RENEW, "")
         this._renewStates = []
-        this._saveItem(StorageKey.NONCE_IDTOKEN, "")
-        this._saveItem(StorageKey.IDTOKEN, "")
-        this._saveItem(StorageKey.ERROR, "")
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
-        this._saveItem(StorageKey.LOGIN_ERROR, "")
-        this._saveItem(StorageKey.LOGIN_ERROR, "")
-        var keys = this._getItem(StorageKey.TOKEN_KEYS) as any
+        saveItem(StorageKey.NONCE_IDTOKEN, "")
+        saveItem(StorageKey.IDTOKEN, "")
+        saveItem(StorageKey.ERROR, "")
+        saveItem(StorageKey.ERROR_DESCRIPTION, "")
+        saveItem(StorageKey.LOGIN_ERROR, "")
+        saveItem(StorageKey.LOGIN_ERROR, "")
+        var keys = getItem(StorageKey.TOKEN_KEYS) as any
 
-        if (!this._isEmpty(keys)) {
+        if (!isEmpty(keys)) {
             keys = keys.split(RESOURCE_DELIMETER)
             for (var i = 0; i < keys.length && keys[i] !== ""; i++) {
-                this._saveItem(StorageKey.ACCESS_TOKEN_KEY + keys[i], "")
-                this._saveItem(StorageKey.EXPIRATION_KEY + keys[i], 0)
+                saveItem(StorageKey.ACCESS_TOKEN_KEY + keys[i], "")
+                saveItem(StorageKey.EXPIRATION_KEY + keys[i], 0)
             }
         }
 
-        this._saveItem(StorageKey.TOKEN_KEYS, "")
+        saveItem(StorageKey.TOKEN_KEYS, "")
     }
 
     /**
@@ -856,13 +850,13 @@ export class Adal {
      * @param {string}  resource a URI that identifies the resource.
      */
     clearCacheForResource(resource: string) {
-        this._saveItem(StorageKey.STATE_RENEW, "")
-        this._saveItem(StorageKey.ERROR, "")
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
+        saveItem(StorageKey.STATE_RENEW, "")
+        saveItem(StorageKey.ERROR, "")
+        saveItem(StorageKey.ERROR_DESCRIPTION, "")
 
         if (this._hasResource(resource)) {
-            this._saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
-            this._saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
+            saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
+            saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
         }
     }
 
@@ -891,15 +885,12 @@ export class Adal {
                     encodeURIComponent(this.config.postLogoutRedirectUri)
             }
 
-            urlNavigate = this.config.instance + tenant + "/oauth2/logout?" + logout
+            urlNavigate =
+                this.config.instance + tenant + "/oauth2/logout?" + logout
         }
 
         this.infoPii("Logout navigate to: " + urlNavigate)
         this.promptUser(urlNavigate)
-    }
-
-    _isEmpty(str) {
-        return typeof str === "undefined" || !str || 0 === str.length
     }
 
     /**
@@ -925,9 +916,9 @@ export class Adal {
         }
 
         // frame is used to get idtoken
-        var idtoken = this._getItem(StorageKey.IDTOKEN)
+        var idtoken = getItem(StorageKey.IDTOKEN)
 
-        if (!this._isEmpty(idtoken)) {
+        if (!isEmpty(idtoken)) {
             this.info("User exists in cache: ")
             this._user = this._createUser(idtoken)
             callback(null, this._user)
@@ -1024,40 +1015,11 @@ export class Adal {
     }
 
     /**
-     * Returns the anchor part(#) of the URL
-     * @ignore
-     */
-    _getHash(hash) {
-        if (hash.indexOf("#/") > -1) {
-            hash = hash.substring(hash.indexOf("#/") + 2)
-        } else if (hash.indexOf("#") > -1) {
-            hash = hash.substring(1)
-        }
-
-        return hash
-    }
-
-    /**
-     * Checks if the URL fragment contains access token, id token or error_description.
-     * @param {string} hash  -  Hash passed from redirect page
-     * @returns {Boolean} true if response contains id_token, access_token or error, false otherwise.
-     */
-    isCallback(hash) {
-        hash = this._getHash(hash)
-        var parameters = this._deserialize(hash)
-        return (
-            parameters.hasOwnProperty(ERROR_DESCRIPTION) ||
-            parameters.hasOwnProperty(ACCESS_TOKEN) ||
-            parameters.hasOwnProperty(ID_TOKEN)
-        )
-    }
-
-    /**
      * Gets login error
      * @returns {string} error message related to login.
      */
     getLoginError() {
-        return this._getItem(StorageKey.LOGIN_ERROR)
+        return getItem(StorageKey.LOGIN_ERROR)
     }
 
     /**
@@ -1075,8 +1037,7 @@ export class Adal {
      * @returns {RequestInfo} an object created from the redirect response from AAD comprising of the keys - parameters, requestType, stateMatch, stateResponse and valid.
      */
     getRequestInfo(hash) {
-        hash = this._getHash(hash)
-        var parameters = this._deserialize(hash)
+        var parameters = deserialize(getHash(hash))
         var requestInfo = {
             valid: false,
             parameters: {},
@@ -1137,7 +1098,7 @@ export class Adal {
      * @ignore
      */
     _matchNonce(user) {
-        var requestNonce = this._getItem(StorageKey.NONCE_IDTOKEN)
+        var requestNonce = getItem(StorageKey.NONCE_IDTOKEN)
 
         if (requestNonce) {
             requestNonce = requestNonce.split(CACHE_DELIMETER)
@@ -1156,7 +1117,7 @@ export class Adal {
      * @ignore
      */
     _matchState(requestInfo) {
-        var loginStates = this._getItem(StorageKey.STATE_LOGIN)
+        var loginStates = getItem(StorageKey.STATE_LOGIN)
 
         if (loginStates) {
             loginStates = loginStates.split(CACHE_DELIMETER)
@@ -1169,7 +1130,7 @@ export class Adal {
             }
         }
 
-        var acquireTokenStates = this._getItem(StorageKey.STATE_RENEW)
+        var acquireTokenStates = getItem(StorageKey.STATE_RENEW)
 
         if (acquireTokenStates) {
             acquireTokenStates = acquireTokenStates.split(CACHE_DELIMETER)
@@ -1186,22 +1147,6 @@ export class Adal {
     }
 
     /**
-     * Extracts resource value from state.
-     * @ignore
-     */
-    _getResourceFromState(state) {
-        if (state) {
-            var splitIndex = state.indexOf("|")
-
-            if (splitIndex > -1 && splitIndex + 1 < state.length) {
-                return state.substring(splitIndex + 1)
-            }
-        }
-
-        return ""
-    }
-
-    /**
      * Saves token or error received in the response from AAD in the cache. In case of id_token, it also creates the user object.
      */
     saveTokenFromHash(requestInfo) {
@@ -1211,10 +1156,10 @@ export class Adal {
                 "; Request type:" +
                 requestInfo.requestType,
         )
-        this._saveItem(StorageKey.ERROR, "")
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
+        saveItem(StorageKey.ERROR, "")
+        saveItem(StorageKey.ERROR_DESCRIPTION, "")
 
-        var resource = this._getResourceFromState(requestInfo.stateResponse)
+        var resource = getResourceFromState(requestInfo.stateResponse)
 
         // Record error
         if (requestInfo.parameters.hasOwnProperty(ERROR_DESCRIPTION)) {
@@ -1224,15 +1169,15 @@ export class Adal {
                     "; Error description:" +
                     requestInfo.parameters[ERROR_DESCRIPTION],
             )
-            this._saveItem(StorageKey.ERROR, requestInfo.parameters.error)
-            this._saveItem(
+            saveItem(StorageKey.ERROR, requestInfo.parameters.error)
+            saveItem(
                 StorageKey.ERROR_DESCRIPTION,
                 requestInfo.parameters[ERROR_DESCRIPTION],
             )
 
             if (requestInfo.requestType === RequestType.LOGIN) {
                 this._loginInProgress = false
-                this._saveItem(
+                saveItem(
                     StorageKey.LOGIN_ERROR,
                     requestInfo.parameters.error_description,
                 )
@@ -1243,7 +1188,7 @@ export class Adal {
                 // record tokens to storage if exists
                 this.info("State is right")
                 if (requestInfo.parameters.hasOwnProperty(SESSION_STATE)) {
-                    this._saveItem(
+                    saveItem(
                         StorageKey.SESSION_STATE,
                         requestInfo.parameters[SESSION_STATE],
                     )
@@ -1255,20 +1200,20 @@ export class Adal {
                     this.info("Fragment has access token")
 
                     if (!this._hasResource(resource)) {
-                        keys = this._getItem(StorageKey.TOKEN_KEYS) || ""
-                        this._saveItem(
+                        keys = getItem(StorageKey.TOKEN_KEYS) || ""
+                        saveItem(
                             StorageKey.TOKEN_KEYS,
                             keys + resource + RESOURCE_DELIMETER,
                         )
                     }
 
                     // save token with related resource
-                    this._saveItem(
-                        StorageKey.ACCESS_TOKEN_KEY + resource ,
+                    saveItem(
+                        StorageKey.ACCESS_TOKEN_KEY + resource,
                         requestInfo.parameters[ACCESS_TOKEN],
                     )
-                    this._saveItem(
-                        StorageKey.EXPIRATION_KEY + resource ,
+                    saveItem(
+                        StorageKey.EXPIRATION_KEY + resource,
                         this._expiresIn(requestInfo.parameters[EXPIRES_IN]),
                     )
                 }
@@ -1281,16 +1226,16 @@ export class Adal {
                     )
                     if (this._user && this._user.profile) {
                         if (!this._matchNonce(this._user)) {
-                            this._saveItem(
+                            saveItem(
                                 StorageKey.LOGIN_ERROR,
                                 "Nonce received: " +
                                     this._user.profile.nonce +
                                     " is not same as requested: " +
-                                    this._getItem(StorageKey.NONCE_IDTOKEN),
+                                    getItem(StorageKey.NONCE_IDTOKEN),
                             )
                             this._user = null
                         } else {
-                            this._saveItem(
+                            saveItem(
                                 StorageKey.IDTOKEN,
                                 requestInfo.parameters[ID_TOKEN],
                             )
@@ -1301,20 +1246,19 @@ export class Adal {
                                 : this.config.clientId
 
                             if (!this._hasResource(resource)) {
-                                keys =
-                                    this._getItem(StorageKey.TOKEN_KEYS) || ""
-                                this._saveItem(
+                                keys = getItem(StorageKey.TOKEN_KEYS) || ""
+                                saveItem(
                                     StorageKey.TOKEN_KEYS,
                                     keys + resource + RESOURCE_DELIMETER,
                                 )
                             }
 
-                            this._saveItem(
-                                StorageKey.ACCESS_TOKEN_KEY + resource ,
+                            saveItem(
+                                StorageKey.ACCESS_TOKEN_KEY + resource,
                                 requestInfo.parameters[ID_TOKEN],
                             )
-                            this._saveItem(
-                                StorageKey.EXPIRATION_KEY + resource ,
+                            saveItem(
+                                StorageKey.EXPIRATION_KEY + resource,
                                 this._user.profile.exp,
                             )
                         }
@@ -1323,8 +1267,8 @@ export class Adal {
                         requestInfo.parameters["error_description"] =
                             "Invalid id_token. id_token: " +
                             requestInfo.parameters[ID_TOKEN]
-                        this._saveItem(StorageKey.ERROR, "invalid id_token")
-                        this._saveItem(
+                        saveItem(StorageKey.ERROR, "invalid id_token")
+                        saveItem(
                             StorageKey.ERROR_DESCRIPTION,
                             "Invalid id_token. id_token: " +
                                 requestInfo.parameters[ID_TOKEN],
@@ -1335,18 +1279,15 @@ export class Adal {
                 requestInfo.parameters["error"] = "Invalid_state"
                 requestInfo.parameters["error_description"] =
                     "Invalid_state. state: " + requestInfo.stateResponse
-                this._saveItem(StorageKey.ERROR, "Invalid_state")
-                this._saveItem(
+                saveItem(StorageKey.ERROR, "Invalid_state")
+                saveItem(
                     StorageKey.ERROR_DESCRIPTION,
                     "Invalid_state. state: " + requestInfo.stateResponse,
                 )
             }
         }
 
-        this._saveItem(
-            StorageKey.RENEW_STATUS + resource ,
-            TokenRenewStatus.COMPLETED,
-        )
+        saveItem(StorageKey.RENEW_STATUS + resource, TokenRenewStatus.COMPLETED)
     }
 
     /**
@@ -1418,7 +1359,7 @@ export class Adal {
             hash = window.location.hash
         }
 
-        if (this.isCallback(hash)) {
+        if (isCallback(hash)) {
             var self: Adal = null as any
             var isPopup = false
 
@@ -1511,7 +1452,8 @@ export class Adal {
             tenant +
             "/oauth2/authorize" +
             this._serialize(responseType, this.config, resource) +
-            this._addLibMetadata()
+            "&x-client-SKU=Js&x-client-Ver=" +
+            VERSION
         this.info("Navigate url:" + urlNavigate)
         return urlNavigate
     }
@@ -1628,7 +1570,7 @@ export class Adal {
      */
     // Adal.node js crack function
     _decodeJwt(jwtToken: string) {
-        if (this._isEmpty(jwtToken)) {
+        if (isEmpty(jwtToken)) {
             return null
         }
 
@@ -1690,28 +1632,6 @@ export class Adal {
         }
 
         return str.join("&")
-    }
-
-    /**
-     * Parses the query string parameters into a key-value pair object.
-     * @ignore
-     */
-    _deserialize(query: string) {
-        var match,
-            pl = /\+/g, // Regex for replacing addition symbol with a space
-            search = /([^&=]+)=([^&]*)/g,
-            decode = function (s) {
-                return decodeURIComponent(s.replace(pl, " "))
-            },
-            obj = {}
-        match = search.exec(query)
-
-        while (match) {
-            obj[decode(match[1])] = decode(match[2])
-            match = search.exec(query)
-        }
-
-        return obj
     }
 
     /**
@@ -1817,11 +1737,7 @@ export class Adal {
     _expiresIn(expires: any) {
         // if AAD did not send "expires_in" property, use default expiration of 3599 seconds, for some reason AAD sends 3599 as "expires_in" value instead of 3600
         if (!expires) expires = 3599
-        return this._now() + parseInt(expires, 10)
-    }
-
-    _now() {
-        return Math.round(new Date().getTime() / 1000.0)
+        return now() + parseInt(expires, 10)
     }
 
     /**
@@ -1873,103 +1789,6 @@ export class Adal {
     }
 
     /**
-     * Saves the key-value pair in the cache
-     * @ignore
-     */
-    _saveItem(key: string, obj: any, preserve = false) {
-        if (
-            this.config &&
-            this.config.cacheLocation &&
-            this.config.cacheLocation === "localStorage"
-        ) {
-            if (!this._supportsLocalStorage()) {
-                this.info("Local storage is not supported")
-                return false
-            }
-
-            if (preserve) {
-                var value = this._getItem(key) || ""
-                localStorage.setItem(key, value + obj + CACHE_DELIMETER)
-            } else {
-                localStorage.setItem(key, obj)
-            }
-
-            return true
-        }
-
-        // Default as session storage
-        if (!this._supportsSessionStorage()) {
-            this.info("Session storage is not supported")
-            return false
-        }
-
-        sessionStorage.setItem(key, obj)
-        return true
-    }
-
-    /**
-     * Searches the value for the given key in the cache
-     * @ignore
-     */
-    _getItem(key: string): any {
-        if (
-            this.config &&
-            this.config.cacheLocation &&
-            this.config.cacheLocation === "localStorage"
-        ) {
-            if (!this._supportsLocalStorage()) {
-                this.info("Local storage is not supported")
-                return null
-            }
-
-            return localStorage.getItem(key)
-        }
-
-        // Default as session storage
-        if (!this._supportsSessionStorage()) {
-            this.info("Session storage is not supported")
-            return null
-        }
-
-        return sessionStorage.getItem(key)
-    }
-
-    /**
-     * Returns true if browser supports localStorage, false otherwise.
-     * @ignore
-     */
-    _supportsLocalStorage() {
-        try {
-            if (!window.localStorage) return false // Test availability
-            window.localStorage.setItem("storageTest", "A") // Try write
-            if (window.localStorage.getItem("storageTest") != "A") return false // Test read/write
-            window.localStorage.removeItem("storageTest") // Try delete
-            if (window.localStorage.getItem("storageTest")) return false // Test delete
-            return true // Success
-        } catch (e) {
-            return false
-        }
-    }
-
-    /**
-     * Returns true if browser supports sessionStorage, false otherwise.
-     * @ignore
-     */
-    _supportsSessionStorage() {
-        try {
-            if (!window.sessionStorage) return false // Test availability
-            window.sessionStorage.setItem("storageTest", "A") // Try write
-            if (window.sessionStorage.getItem("storageTest") != "A")
-                return false // Test read/write
-            window.sessionStorage.removeItem("storageTest") // Try delete
-            if (window.sessionStorage.getItem("storageTest")) return false // Test delete
-            return true // Success
-        } catch (e) {
-            return false
-        }
-    }
-
-    /**
      * Returns a cloned copy of the passed object.
      * @ignore
      */
@@ -1985,14 +1804,6 @@ export class Adal {
             }
         }
         return copy
-    }
-
-    /**
-     * Adds the library version and returns it.
-     * @ignore
-     */
-    _addLibMetadata() {
-        return "&x-client-SKU=Js&x-client-Ver=" + this._libVersion()
     }
 
     /**
@@ -2020,7 +1831,7 @@ export class Adal {
                     ":" +
                     this.config.correlationId +
                     "-" +
-                    this._libVersion() +
+                    VERSION +
                     "-" +
                     LOG_LEVEL_LABELS[level] +
                     " " +
@@ -2029,7 +1840,7 @@ export class Adal {
                 formattedMessage =
                     timestamp +
                     ":" +
-                    this._libVersion() +
+                    VERSION +
                     "-" +
                     LOG_LEVEL_LABELS[level] +
                     " " +
@@ -2108,12 +1919,124 @@ export class Adal {
     verbosePii(message: string) {
         this.log(LogLevel.Verbose, message, null, true)
     }
+}
 
-    /**
-     * Returns the library version.
-     * @ignore
-     */
-    _libVersion() {
-        return VERSION
+/**
+ * Saves the key-value pair in the cache
+ * @ignore
+ */
+function saveItem(key: string, value: any, preserve = false) {
+    if (preserve) {
+        const old = getItem(key) || ""
+        STORAGE.setItem(key, value + old + CACHE_DELIMETER)
+    } else {
+        STORAGE.setItem(key, value)
     }
+}
+
+/**
+ * Searches the value for the given key in the cache
+ * @ignore
+ */
+function getItem(key: string): any {
+    return STORAGE.getItem(key)
+}
+
+/**
+ * Returns the anchor part(#) of the URL
+ * @ignore
+ */
+function getHash(hash: string) {
+    if (hash.indexOf("#/") > -1) {
+        hash = hash.substring(hash.indexOf("#/") + 2)
+    } else if (hash.indexOf("#") > -1) {
+        hash = hash.substring(1)
+    }
+    return hash
+}
+
+/**
+ * Checks if the URL fragment contains access token, id token or error_description.
+ * @param {string} hash  -  Hash passed from redirect page
+ * @returns {Boolean} true if response contains id_token, access_token or error, false otherwise.
+ */
+function isCallback(hash: string) {
+    const parameters = deserialize(getHash(hash))
+    return (
+        has(parameters, ERROR_DESCRIPTION) ||
+        has(parameters, ACCESS_TOKEN) ||
+        has(parameters, ID_TOKEN)
+    )
+}
+
+/**
+ * Parses the query string parameters into a key-value pair object.
+ * @ignore
+ */
+function deserialize(query: string) {
+    var match,
+        pl = /\+/g, // Regex for replacing addition symbol with a space
+        search = /([^&=]+)=([^&]*)/g,
+        decode = (s: string) => decodeURIComponent(s.replace(pl, " ")),
+        obj = {}
+    match = search.exec(query)
+
+    while (match) {
+        obj[decode(match[1])] = decode(match[2])
+        match = search.exec(query)
+    }
+
+    return obj
+}
+
+/**
+ * Extracts resource value from state.
+ * @ignore
+ */
+function getResourceFromState(state) {
+    if (state) {
+        var splitIndex = state.indexOf("|")
+
+        if (splitIndex > -1 && splitIndex + 1 < state.length) {
+            return state.substring(splitIndex + 1)
+        }
+    }
+
+    return ""
+}
+
+function isEmpty(str: string): boolean {
+    return typeof str === "undefined" || !str || 0 === str.length
+}
+
+function has(obj: any, key: string): boolean {
+    return Object.hasOwnProperty.call(obj, key)
+}
+
+function detectStorage(): {
+    getItem(key: string): any
+    setItem(key: string, value: any): void
+} {
+    function supportsStorage(type: string) {
+        if (!window[type]) {
+            return false
+        }
+        const testKey = "__storageTest__"
+        window[type].setItem(testKey, "A")
+        if (window[type].getItem(testKey) !== "A") {
+            return false
+        }
+        window[type].removeItem(testKey)
+        if (window[type].getItem(testKey)) {
+            return false
+        }
+        return true
+    }
+    if (supportsStorage("localStorage")) return localStorage
+    if (supportsStorage("sessionStorage")) return sessionStorage
+    return {getItem() {}, setItem() {}} as any
+}
+
+function now() {
+	return Math.round(Date.now() / 1000)
 }
