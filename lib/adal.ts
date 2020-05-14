@@ -81,7 +81,6 @@ export class Adal {
     config: Config
     logLevel = LogLevel.Error
     piiLoggingEnabled = false
-    isAngular = false
 
     // TODO: move off of instance for smaller property names
     _user: any
@@ -296,13 +295,6 @@ export class Adal {
                 var errorDesc =
                     "Popup Window closed by UI action/ Popup Window handle destroyed due to cross zone navigation in IE/Edge"
 
-                if (this.isAngular) {
-                    this._broadcast(
-                        "adal:popUpClosed",
-                        errorDesc + RESOURCE_DELIMETER + error,
-                    )
-                }
-
                 this._handlePopupError(
                     loginCallback,
                     resource,
@@ -320,14 +312,7 @@ export class Adal {
                         encodeURI(registeredRedirectUri),
                     ) != -1
                 ) {
-                    if (this.isAngular) {
-                        this._broadcast(
-                            "adal:popUpHashChanged",
-                            popUpWindowLocation.hash,
-                        )
-                    } else {
                         this.handleWindowCallback(popUpWindowLocation.hash)
-                    }
 
                     window.clearInterval(pollTimer)
                     this._loginInProgress = false
@@ -339,37 +324,6 @@ export class Adal {
                 }
             } catch (e) {}
         }, 1)
-    }
-
-    _broadcast(eventName: string, data: any) {
-        // Custom Event is not supported in IE, below IIFE will polyfill the CustomEvent() constructor functionality in Internet Explorer 9 and higher
-        ;(function () {
-            if (typeof window.CustomEvent === "function") {
-                return false
-            }
-
-            function CustomEvent(event, params) {
-                params = params || {
-                    bubbles: false,
-                    cancelable: false,
-                    detail: undefined,
-                }
-                var evt = document.createEvent("CustomEvent")
-                evt.initCustomEvent(
-                    event,
-                    params.bubbles,
-                    params.cancelable,
-                    params.detail,
-                )
-                return evt
-            }
-
-            CustomEvent.prototype = window.Event.prototype
-            window.CustomEvent = CustomEvent
-        })()
-
-        var evt = new CustomEvent(eventName, {detail: data})
-        window.dispatchEvent(evt)
     }
 
     loginInProgress() {
