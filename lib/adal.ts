@@ -811,18 +811,12 @@ export class Adal {
     logOut() {
         this.clearCache()
         this._user = null
-        var urlNavigate
+        let urlNavigate: string
 
         if (this.config.logOutUri) {
             urlNavigate = this.config.logOutUri
         } else {
-            var tenant = "common"
-            var logout = ""
-
-            if (this.config.tenant) {
-                tenant = this.config.tenant
-            }
-
+            let logout = ""
             if (this.config.postLogoutRedirectUri) {
                 logout =
                     "post_logout_redirect_uri=" +
@@ -830,7 +824,7 @@ export class Adal {
             }
 
             urlNavigate =
-                this.config.instance + tenant + "/oauth2/logout?" + logout
+                this.config.instance + this.config.tenant + "/oauth2/logout?" + logout
         }
 
         this.logger.infoPii("Logout navigate to: " + urlNavigate)
@@ -848,11 +842,6 @@ export class Adal {
      * @param {userCallback} callback - The callback provided by the caller. It will be called with user or error.
      */
     getUser(callback) {
-        // IDToken is first call
-        if (typeof callback !== "function") {
-            throw new Error("callback is not a function")
-        }
-
         // user in memory
         if (this._user) {
             callback(null, this._user)
@@ -860,10 +849,8 @@ export class Adal {
         }
 
         // frame is used to get idtoken
-        var idtoken = getItem(StorageKey.IDTOKEN)
-
+        const idtoken = getItem(StorageKey.IDTOKEN)
         if (!isEmpty(idtoken)) {
-            this.logger.info("User exists in cache: ")
             this._user = this._createUser(idtoken)
             callback(null, this._user)
         } else {
@@ -980,48 +967,45 @@ export class Adal {
             requestType: RequestType.UNKNOWN,
         }
 
-        if (parameters) {
-            requestInfo.parameters = parameters
-            if (
-                parameters.hasOwnProperty(ERROR_DESCRIPTION) ||
-                parameters.hasOwnProperty(ACCESS_TOKEN) ||
-                parameters.hasOwnProperty(ID_TOKEN)
-            ) {
-                requestInfo.valid = true
+        if (!parameters) {
+            return requestInfo
+        }
 
-                // which call
-                if (parameters.hasOwnProperty("state")) {
-                    this.logger.verbose("State: " + parameters.state)
-                    requestInfo.stateResponse = parameters.state
-                } else {
-                    this.logger.warn("No state returned")
-                    return requestInfo
-                }
+        requestInfo.parameters = parameters
+        if (
+            has(parameters, ERROR_DESCRIPTION) ||
+            has(parameters, ACCESS_TOKEN) ||
+            has(parameters, ID_TOKEN)
+        ) {
+            requestInfo.valid = true
 
-                // async calls can fire iframe and login request at the same time if developer does not use the API as expected
-                // incoming callback needs to be looked up to find the request type
-                if (this._matchState(requestInfo)) {
-                    // loginRedirect or acquireTokenRedirect
-                    return requestInfo
-                }
+            // which call
+            if (parameters.hasOwnProperty("state")) {
+                this.logger.verbose("State: " + parameters.state)
+                requestInfo.stateResponse = parameters.state
+            } else {
+                this.logger.warn("No state returned")
+                return requestInfo
+            }
 
-                // external api requests may have many renewtoken requests for different resource
-                if (!requestInfo.stateMatch && window.parent) {
-                    requestInfo.requestType = this._requestType
-                    var statesInParentContext = this._renewStates
-                    for (var i = 0; i < statesInParentContext.length; i++) {
-                        if (
-                            statesInParentContext[i] ===
-                            requestInfo.stateResponse
-                        ) {
-                            requestInfo.stateMatch = true
-                            break
-                        }
+            // async calls can fire iframe and login request at the same time if developer does not use the API as expected
+            // incoming callback needs to be looked up to find the request type
+            if (this._matchState(requestInfo)) {
+                // loginRedirect or acquireTokenRedirect
+                return requestInfo
+            }
+
+            // external api requests may have many renewtoken requests for different resource
+            if (!requestInfo.stateMatch && window.parent) {
+                requestInfo.requestType = this._requestType
+                for (const state of this._renewStates) {
+                    if (state === requestInfo.stateResponse) {
+                        requestInfo.stateMatch = true
+                        break
                     }
                 }
             }
         }
-        return requestInfo
     }
 
     /**
@@ -1029,17 +1013,14 @@ export class Adal {
      * @ignore
      */
     _matchNonce(user) {
-        var requestNonce = getItem(StorageKey.NONCE_IDTOKEN)
-
+        const requestNonce = getItem(StorageKey.NONCE_IDTOKEN)
         if (requestNonce) {
-            requestNonce = requestNonce.split(CACHE_DELIMETER)
-            for (var i = 0; i < requestNonce.length; i++) {
-                if (requestNonce[i] === user.profile.nonce) {
+            for (const nonce of requestNonce.split(CACHE_DELIMETER)) {
+                if (nonce === user.profile.nonce) {
                     return true
                 }
             }
         }
-
         return false
     }
 
@@ -1048,12 +1029,10 @@ export class Adal {
      * @ignore
      */
     _matchState(requestInfo) {
-        var loginStates = getItem(StorageKey.STATE_LOGIN)
-
+        const loginStates = getItem(StorageKey.STATE_LOGIN)
         if (loginStates) {
-            loginStates = loginStates.split(CACHE_DELIMETER)
-            for (var i = 0; i < loginStates.length; i++) {
-                if (loginStates[i] === requestInfo.stateResponse) {
+            for (const state of loginStates.split(CACHE_DELIMETER)) {
+                if (state === requestInfo.stateResponse) {
                     requestInfo.requestType = RequestType.LOGIN
                     requestInfo.stateMatch = true
                     return true
@@ -1061,12 +1040,10 @@ export class Adal {
             }
         }
 
-        var acquireTokenStates = getItem(StorageKey.STATE_RENEW)
-
+        const acquireTokenStates = getItem(StorageKey.STATE_RENEW)
         if (acquireTokenStates) {
-            acquireTokenStates = acquireTokenStates.split(CACHE_DELIMETER)
-            for (var i = 0; i < acquireTokenStates.length; i++) {
-                if (acquireTokenStates[i] === requestInfo.stateResponse) {
+            for (const state of acquireTokenStates.split(CACHE_DELIMETER)) {
+                if (state === requestInfo.stateResponse) {
                     requestInfo.requestType = RequestType.RENEW_TOKEN
                     requestInfo.stateMatch = true
                     return true
@@ -1375,14 +1352,9 @@ export class Adal {
      * @ignore
      */
     _getNavigateUrl(responseType: string, resource?: string) {
-        var tenant = "common"
-        if (this.config.tenant) {
-            tenant = this.config.tenant
-        }
-
-        var urlNavigate =
+        const urlNavigate =
             this.config.instance +
-            tenant +
+            this.config.tenant +
             "/oauth2/authorize" +
             this._serialize(responseType, this.config, resource) +
             "&x-client-SKU=Js&x-client-Ver=" +
@@ -1400,7 +1372,7 @@ export class Adal {
         var decodedToken = this._decodeJwt(encodedIdToken)
 
         if (!decodedToken) {
-            return null
+            return
         }
 
         try {
@@ -1411,7 +1383,7 @@ export class Adal {
                 this.logger.info(
                     "The returned id_token could not be base64 url safe decoded.",
                 )
-                return null
+                return
             }
 
             // ECMA script has JSON built-in support
@@ -1419,8 +1391,6 @@ export class Adal {
         } catch (err) {
             this.logger.error("The returned id_token could not be decoded", err)
         }
-
-        return null
     }
 
     /**
@@ -1515,7 +1485,7 @@ export class Adal {
      * @ignore
      */
     _addAdalFrame(iframeId: string) {
-        if (typeof iframeId === "undefined") {
+        if (!iframeId) {
             return
         }
 
