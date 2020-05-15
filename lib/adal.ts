@@ -95,9 +95,9 @@ export class Adal {
         this._loginInProgress = true
 
         // Token is not present and user needs to login
-        var expectedState = this._guid()
+        var expectedState = guid()
         this.config.state = expectedState
-        this._idTokenNonce = this._guid()
+        this._idTokenNonce = guid()
         var loginStartPage = getItem(StorageKey.ANGULAR_LOGIN_REQUEST)
 
         if (!loginStartPage || loginStartPage === "") {
@@ -412,7 +412,7 @@ export class Adal {
         // use given resource to create new authz url
         this.logger.info("renewToken is called for resource:" + resource)
         var frameHandle = this._addAdalFrame("adalRenewFrame" + resource)
-        var expectedState = this._guid() + "|" + resource
+        var expectedState = guid() + "|" + resource
         this.config.state = expectedState
         // renew happens in iframe, so it keeps javascript context
         this._renewStates.push(expectedState)
@@ -424,7 +424,7 @@ export class Adal {
         )
 
         if (responseType === ResponseType.ID_TOKEN) {
-            this._idTokenNonce = this._guid()
+            this._idTokenNonce = guid()
             saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
             urlNavigate += "&nonce=" + encodeURIComponent(this._idTokenNonce)
         }
@@ -450,8 +450,8 @@ export class Adal {
         // use iframe to try to renew token
         this.logger.info("renewIdToken is called")
         let frameHandle = this._addAdalFrame("adalIdTokenFrame")
-        let expectedState = this._guid() + "|" + this.config.clientId
-        this._idTokenNonce = this._guid()
+        let expectedState = guid() + "|" + this.config.clientId
+        this._idTokenNonce = guid()
         saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
         this.config.state = expectedState
         // renew happens in iframe, so it keeps javascript context
@@ -673,7 +673,7 @@ export class Adal {
             return
         }
 
-        var expectedState = this._guid() + "|" + resource
+        var expectedState = guid() + "|" + resource
         this.config.state = expectedState
         this._renewStates.push(expectedState)
         this._requestType = RequestType.RENEW_TOKEN
@@ -735,7 +735,7 @@ export class Adal {
             return
         }
 
-        var expectedState = this._guid() + "|" + resource
+        var expectedState = guid() + "|" + resource
         this.config.state = expectedState
         this.logger.verbose("Renew token Expected state: " + expectedState)
 
@@ -1576,79 +1576,11 @@ export class Adal {
                 str.push(obj.extraQueryParameter)
             }
 
-            var correlationId = obj.correlationId
-                ? obj.correlationId
-                : this._guid()
+            var correlationId = obj.correlationId ? obj.correlationId : guid()
             str.push("client-request-id=" + encodeURIComponent(correlationId))
         }
 
         return str.join("&")
-    }
-
-    /**
-     * Generates RFC4122 version 4 guid (128 bits)
-     * @ignore
-     */
-    _guid() {
-        // RFC4122: The version 4 UUID is meant for generating UUIDs from truly-random or
-        // pseudo-random numbers.
-        // The algorithm is as follows:
-        //     Set the two most significant bits (bits 6 and 7) of the
-        //        clock_seq_hi_and_reserved to zero and one, respectively.
-        //     Set the four most significant bits (bits 12 through 15) of the
-        //        time_hi_and_version field to the 4-bit version number from
-        //        Section 4.1.3. Version4
-        //     Set all the other bits to randomly (or pseudo-randomly) chosen
-        //     values.
-        // UUID                   = time-low "-" time-mid "-"time-high-and-version "-"clock-seq-reserved and low(2hexOctet)"-" node
-        // time-low               = 4hexOctet
-        // time-mid               = 2hexOctet
-        // time-high-and-version  = 2hexOctet
-        // clock-seq-and-reserved = hexOctet:
-        // clock-seq-low          = hexOctet
-        // node                   = 6hexOctet
-        // Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-        // y could be 1000, 1001, 1010, 1011 since most significant two bits needs to be 10
-        // y values are 8, 9, A, B
-        // @ts-expect-error
-        var cryptoObj = window.crypto || window.msCrypto // for IE 11
-        var buffer = new Uint8Array(16)
-        cryptoObj.getRandomValues(buffer)
-        //buffer[6] and buffer[7] represents the time_hi_and_version field. We will set the four most significant bits (4 through 7) of buffer[6] to represent decimal number 4 (UUID version number).
-        buffer[6] |= 0x40 //buffer[6] | 01000000 will set the 6 bit to 1.
-        buffer[6] &= 0x4f //buffer[6] & 01001111 will set the 4, 5, and 7 bit to 0 such that bits 4-7 == 0100 = "4".
-        //buffer[8] represents the clock_seq_hi_and_reserved field. We will set the two most significant bits (6 and 7) of the clock_seq_hi_and_reserved to zero and one, respectively.
-        buffer[8] |= 0x80 //buffer[8] | 10000000 will set the 7 bit to 1.
-        buffer[8] &= 0xbf //buffer[8] & 10111111 will set the 6 bit to 0.
-        buffer = buffer.map((n: any) => {
-            let hex = n.toString(16)
-            while (hex.length < 2) {
-                hex = "0" + hex
-            }
-            return hex
-        })
-        return (
-            buffer[0] +
-            buffer[1] +
-            buffer[2] +
-            buffer[3] +
-            "-" +
-            buffer[4] +
-            buffer[5] +
-            "-" +
-            buffer[6] +
-            buffer[7] +
-            "-" +
-            buffer[8] +
-            buffer[9] +
-            "-" +
-            buffer[10] +
-            buffer[11] +
-            buffer[12] +
-            buffer[13] +
-            buffer[14] +
-            buffer[15]
-        )
     }
 
     /**
@@ -1803,4 +1735,70 @@ function has(obj: any, key: string): boolean {
 
 function now() {
     return Math.round(Date.now() / 1000)
+}
+
+/**
+ * Generates RFC4122 version 4 guid (128 bits)
+ * @ignore
+ */
+function guid(): string {
+    // RFC4122: The version 4 UUID is meant for generating UUIDs from truly-random or
+    // pseudo-random numbers.
+    // The algorithm is as follows:
+    //     Set the two most significant bits (bits 6 and 7) of the
+    //        clock_seq_hi_and_reserved to zero and one, respectively.
+    //     Set the four most significant bits (bits 12 through 15) of the
+    //        time_hi_and_version field to the 4-bit version number from
+    //        Section 4.1.3. Version4
+    //     Set all the other bits to randomly (or pseudo-randomly) chosen
+    //     values.
+    // UUID                   = time-low "-" time-mid "-"time-high-and-version "-"clock-seq-reserved and low(2hexOctet)"-" node
+    // time-low               = 4hexOctet
+    // time-mid               = 2hexOctet
+    // time-high-and-version  = 2hexOctet
+    // clock-seq-and-reserved = hexOctet:
+    // clock-seq-low          = hexOctet
+    // node                   = 6hexOctet
+    // Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    // y could be 1000, 1001, 1010, 1011 since most significant two bits needs to be 10
+    // y values are 8, 9, A, B
+    // @ts-expect-error
+    var cryptoObj = window.crypto || window.msCrypto // for IE 11
+    var buffer = new Uint8Array(16)
+    cryptoObj.getRandomValues(buffer)
+    //buffer[6] and buffer[7] represents the time_hi_and_version field. We will set the four most significant bits (4 through 7) of buffer[6] to represent decimal number 4 (UUID version number).
+    buffer[6] |= 0x40 //buffer[6] | 01000000 will set the 6 bit to 1.
+    buffer[6] &= 0x4f //buffer[6] & 01001111 will set the 4, 5, and 7 bit to 0 such that bits 4-7 == 0100 = "4".
+    //buffer[8] represents the clock_seq_hi_and_reserved field. We will set the two most significant bits (6 and 7) of the clock_seq_hi_and_reserved to zero and one, respectively.
+    buffer[8] |= 0x80 //buffer[8] | 10000000 will set the 7 bit to 1.
+    buffer[8] &= 0xbf //buffer[8] & 10111111 will set the 6 bit to 0.
+    buffer = buffer.map((n: any) => {
+        let hex = n.toString(16)
+        while (hex.length < 2) {
+            hex = "0" + hex
+        }
+        return hex
+    })
+    return (
+        buffer[0] +
+        buffer[1] +
+        buffer[2] +
+        buffer[3] +
+        "-" +
+        buffer[4] +
+        buffer[5] +
+        "-" +
+        buffer[6] +
+        buffer[7] +
+        "-" +
+        buffer[8] +
+        buffer[9] +
+        "-" +
+        buffer[10] +
+        buffer[11] +
+        buffer[12] +
+        buffer[13] +
+        buffer[14] +
+        buffer[15]
+    )
 }
