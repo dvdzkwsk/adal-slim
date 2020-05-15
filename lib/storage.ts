@@ -23,7 +23,7 @@ interface IStorage {
 export const Storage: IStorage = (() => {
     function supportsStorage(type: string) {
         const storage = window[type]
-        if (storage) {
+        if (!storage) {
             return false
         }
         const testKey = "__test__"
