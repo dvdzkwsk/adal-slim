@@ -824,7 +824,10 @@ export class Adal {
             }
 
             urlNavigate =
-                this.config.instance + this.config.tenant + "/oauth2/logout?" + logout
+                this.config.instance +
+                this.config.tenant +
+                "/oauth2/logout?" +
+                logout
         }
 
         this.logger.infoPii("Logout navigate to: " + urlNavigate)
@@ -1287,7 +1290,7 @@ export class Adal {
                 self = window.parent._adalInstance
             }
 
-            let requestInfo = self.getRequestInfo(hash)
+            let requestInfo = self.getRequestInfo(hash) as any
             let tokenReceivedCallback: any
 
             if (isPopup || window.parent !== window) {
