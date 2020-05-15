@@ -551,9 +551,10 @@ export class Adal {
      * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
      */
     acquireToken(resource, callback) {
-        if (isEmpty(resource)) {
-            this.logger.warn("resource is required")
-            callback("resource is required", null, "resource is required")
+        if (!resource) {
+            const error = "resource is required"
+            this.logger.warn(error)
+            callback(error, null, error)
             return
         }
 
@@ -574,8 +575,9 @@ export class Adal {
                 this.config.extraQueryParameter.indexOf("login_hint") !== -1
             )
         ) {
-            this.logger.warn("User login is required")
-            callback("User login is required", null, "login required")
+            const error = "User login is required"
+            this.logger.warn(error)
+            callback(error, null, error)
             return
         }
 
@@ -619,25 +621,7 @@ export class Adal {
      * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
      */
     acquireTokenPopup(resource, extraQueryParameters, claims, callback) {
-        if (isEmpty(resource)) {
-            this.logger.warn("resource is required")
-            callback("resource is required", null, "resource is required")
-            return
-        }
-
-        if (!this._user) {
-            this.logger.warn("User login is required")
-            callback("User login is required", null, "login required")
-            return
-        }
-
-        if (this._acquireTokenInProgress) {
-            this.logger.warn("Acquire token interactive is already in progress")
-            callback(
-                "Acquire token interactive is already in progress",
-                null,
-                "Acquire token interactive is already in progress",
-            )
+        if (!this.ensureCanAcquireToken(resource)) {
             return
         }
 
@@ -679,31 +663,11 @@ export class Adal {
      * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
      */
     acquireTokenRedirect(resource, extraQueryParameters, claims) {
-        const {callback} = this.config
-
-        if (isEmpty(resource)) {
-            this.logger.warn("resource is required")
-            callback("resource is required", null, "resource is required")
+        if (!this.ensureCanAcquireToken(resource)) {
             return
         }
 
-        if (!this._user) {
-            this.logger.warn("User login is required")
-            callback("User login is required", null, "login required")
-            return
-        }
-
-        if (this._acquireTokenInProgress) {
-            this.logger.warn("Acquire token interactive is already in progress")
-            callback(
-                "Acquire token interactive is already in progress",
-                null,
-                "Acquire token interactive is already in progress",
-            )
-            return
-        }
-
-        var expectedState = guid() + "|" + resource
+        const expectedState = guid() + "|" + resource
         this.config.state = expectedState
         this.logger.verbose("Renew token Expected state: " + expectedState)
 
@@ -731,6 +695,28 @@ export class Adal {
         saveItem(StorageKey.LOGIN_REQUEST, window.location.href)
         saveItem(StorageKey.STATE_RENEW, expectedState, true)
         this.promptUser(urlNavigate)
+    }
+
+
+    ensureCanAcquireToken(resource: string): boolean {
+        let error: string | undefined
+        if (!resource) {
+            error = "Resource is required"
+        } else if (!this._user) {
+            error = "User login is required"
+        } else if (this._acquireTokenInProgress) {
+            error = "Acquire token interactive is already in progress"
+        }
+        if (error) {
+            this.logger.warn(error)
+            this.config.callback(
+                error,
+                null,
+                error,
+            )
+            return false
+        }
+        return true
     }
 
     /**
@@ -1533,15 +1519,14 @@ function getHash(hash: string) {
     }
     return hash
 }
-}
 
 /**
  * Checks if the URL fragment contains access token, id token or error_description.
  * @param {string} hash  -  Hash passed from redirect page
  * @returns {Boolean} true if response contains id_token, access_token or error, false otherwise.
  */
-    const parameters = deserialize(getHash(hash))
 function isCallback(hash: string) {
+    const parameters = deserialize(getHash(hash))
     return (
         has(parameters, ERROR_DESCRIPTION) ||
         has(parameters, ACCESS_TOKEN) ||
