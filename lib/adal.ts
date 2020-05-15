@@ -148,28 +148,10 @@ export class Adal {
         popUpHeight: number,
     ) {
         try {
-            /**
-             * adding winLeft and winTop to account for dual monitor
-             * using screenLeft and screenTop for IE8 and earlier
-             */
-            var winLeft = window.screenLeft ? window.screenLeft : window.screenX
-            var winTop = window.screenTop ? window.screenTop : window.screenY
-            /**
-             * window.innerWidth displays browser window's height and width excluding toolbars
-             * using document.documentElement.clientWidth for IE8 and earlier
-             */
-            var width =
-                window.innerWidth ||
-                document.documentElement.clientWidth ||
-                document.body.clientWidth
-            var height =
-                window.innerHeight ||
-                document.documentElement.clientHeight ||
-                document.body.clientHeight
-            var left = width / 2 - popUpWidth / 2 + winLeft
-            var top = height / 2 - popUpHeight / 2 + winTop
-
-            var popupWindow = window.open(
+            const left = window.innerWidth / 2 - popUpWidth / 2 + window.screenX
+            const top =
+                window.innerHeight / 2 - popUpHeight / 2 + window.screenY
+            const popupWindow = window.open(
                 urlNavigate,
                 title,
                 "width=" +
