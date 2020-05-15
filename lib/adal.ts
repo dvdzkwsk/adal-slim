@@ -42,9 +42,7 @@ const VERSION = "1.0.17",
     ERROR_DESCRIPTION = "error_description",
     SESSION_STATE = "session_state",
     RESOURCE_DELIMETER = "|",
-    CACHE_DELIMETER = "||",
-    POPUP_WIDTH = 483,
-    POPUP_HEIGHT = 600
+    CACHE_DELIMETER = "||"
 
 export enum LogLevel {
     Error = 0,
@@ -239,12 +237,7 @@ export class Adal {
      * @ignore
      */
     _loginPopup(urlNavigate: string, resource?: string, callback?: any) {
-        var popupWindow = this._openPopup(
-            urlNavigate,
-            "login",
-            POPUP_WIDTH,
-            POPUP_HEIGHT,
-        )
+        var popupWindow = this._openPopup(urlNavigate, "login", 483, 600)
         var loginCallback = callback || this.config.callback
 
         if (popupWindow == null) {
