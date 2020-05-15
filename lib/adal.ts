@@ -819,31 +819,14 @@ export class Adal {
         this.promptUser(urlNavigate)
     }
 
-    /**
-     * @callback userCallback
-     * @param {string} error error message if user info is not available.
-     * @param {User} user user object retrieved from the cache.
-     */
-
-    /**
-     * Calls the passed in callback with the user object or error message related to the user.
-     * @param {userCallback} callback - The callback provided by the caller. It will be called with user or error.
-     */
-    getUser(callback) {
-        // user in memory
+    getUser() {
         if (this._user) {
-            callback(null, this._user)
-            return
+            return this._user
         }
 
-        // frame is used to get idtoken
-        const idtoken = getItem(StorageKey.IDTOKEN)
-        if (!isEmpty(idtoken)) {
-            this._user = this._createUser(idtoken)
-            callback(null, this._user)
-        } else {
-            this.logger.warn("User information is not available")
-            callback("User information is not available", null)
+        const idToken = getItem(StorageKey.IDTOKEN)
+        if (idToken) {
+            return this._user = this._createUser(idToken)
         }
     }
 
