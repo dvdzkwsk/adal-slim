@@ -16,6 +16,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //----------------------------------------------------------------------
+import {Storage, StorageKey} from "./storage"
+
 enum RequestType {
     LOGIN = "LOGIN",
     RENEW_TOKEN = "RENEW_TOKEN",
@@ -24,24 +26,6 @@ enum RequestType {
 enum ResponseType {
     ID_TOKEN = "id_token token",
     TOKEN = "token",
-}
-
-enum StorageKey {
-    TOKEN_KEYS = "adal.token.keys",
-    ACCESS_TOKEN_KEY = "adal.access.token.key",
-    EXPIRATION_KEY = "adal.expiration.key",
-    STATE_LOGIN = "adal.state.login",
-    STATE_RENEW = "adal.state.renew",
-    NONCE_IDTOKEN = "adal.nonce.idtoken",
-    SESSION_STATE = "adal.session.state",
-    USERNAME = "adal.username",
-    IDTOKEN = "adal.idtoken",
-    ERROR = "adal.error",
-    ERROR_DESCRIPTION = "adal.error.description",
-    LOGIN_REQUEST = "adal.login.request",
-    LOGIN_ERROR = "adal.login.error",
-    RENEW_STATUS = "adal.token.renew.status",
-    ANGULAR_LOGIN_REQUEST = "adal.angular.login.request",
 }
 
 enum TokenRenewStatus {
@@ -60,8 +44,7 @@ const VERSION = "1.0.17",
     RESOURCE_DELIMETER = "|",
     CACHE_DELIMETER = "||",
     POPUP_WIDTH = 483,
-    POPUP_HEIGHT = 600,
-    STORAGE = detectStorage()
+    POPUP_HEIGHT = 600
 
 export enum LogLevel {
     Error = 0,
@@ -1910,9 +1893,9 @@ export class Adal {
 function saveItem(key: string, value: any, preserve = false) {
     if (preserve) {
         const old = getItem(key) || ""
-        STORAGE.setItem(key, value + old + CACHE_DELIMETER)
+        Storage.setItem(key, value + old + CACHE_DELIMETER)
     } else {
-        STORAGE.setItem(key, value)
+        Storage.setItem(key, value)
     }
 }
 
@@ -1921,7 +1904,7 @@ function saveItem(key: string, value: any, preserve = false) {
  * @ignore
  */
 function getItem(key: string): any {
-    return STORAGE.getItem(key)
+    return Storage.getItem(key)
 }
 
 /**
@@ -1993,30 +1976,6 @@ function isEmpty(str: string): boolean {
 
 function has(obj: any, key: string): boolean {
     return !!obj && Object.hasOwnProperty.call(obj, key)
-}
-
-function detectStorage(): {
-    getItem(key: string): any
-    setItem(key: string, value: any): void
-} {
-    function supportsStorage(type: string) {
-        if (!window[type]) {
-            return false
-        }
-        const testKey = "__storageTest__"
-        window[type].setItem(testKey, "A")
-        if (window[type].getItem(testKey) !== "A") {
-            return false
-        }
-        window[type].removeItem(testKey)
-        if (window[type].getItem(testKey)) {
-            return false
-        }
-        return true
-    }
-    if (supportsStorage("localStorage")) return localStorage
-    if (supportsStorage("sessionStorage")) return sessionStorage
-    return {getItem() {}, setItem() {}} as any
 }
 
 function now() {
