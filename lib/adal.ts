@@ -72,6 +72,7 @@ export class Adal {
             instance: "https://login.microsoftonline.com/",
             loginResource: options.clientId,
             laodFrameTimeout: 6000,
+            expireOffsetSeconds: 300,
             anonymousEndpoints: [],
             navigateToLoginRequestUrl: true,
             tenant: "common",
@@ -204,7 +205,7 @@ export class Adal {
         var popupWindow = this._openPopup(urlNavigate, "login", 483, 600)
         var loginCallback = callback || this.config.callback
 
-        if (popupWindow == null) {
+        if (!popupWindow) {
             var error = "Error opening popup"
             var errorDesc =
                 "Popup Window is null. This can happen if you are using IE"
@@ -219,14 +220,9 @@ export class Adal {
         }
 
         this._openedWindows.push(popupWindow)
+        const registeredRedirectUri = this.config.redirectUri.split("#")[0]
 
-        if (this.config.redirectUri.indexOf("#") != -1) {
-            var registeredRedirectUri = this.config.redirectUri.split("#")[0]
-        } else {
-            var registeredRedirectUri = this.config.redirectUri
-        }
-
-        var pollTimer = window.setInterval(() => {
+        var pollTimer = setInterval(() => {
             if (
                 !popupWindow ||
                 popupWindow.closed ||
@@ -243,7 +239,7 @@ export class Adal {
                     errorDesc,
                     errorDesc,
                 )
-                window.clearInterval(pollTimer)
+                clearInterval(pollTimer)
                 return
             }
             try {
@@ -254,8 +250,7 @@ export class Adal {
                     ) != -1
                 ) {
                     this.handleWindowCallback(popUpWindowLocation.hash)
-
-                    window.clearInterval(pollTimer)
+                    clearInterval(pollTimer)
                     this._loginInProgress = false
                     this._acquireTokenInProgress = false
                     this.logger.info("Closing popup window")
@@ -291,13 +286,10 @@ export class Adal {
             return null
         }
 
-        var token = getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
-        var expiry = getItem(StorageKey.EXPIRATION_KEY + resource)
+        const token = getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
+        const expiry = getItem(StorageKey.EXPIRATION_KEY + resource)
 
-        // If expiration is within offset, it will force renew
-        var offset = this.config.expireOffsetSeconds || 300
-
-        if (expiry && expiry > now() + offset) {
+        if (expiry && expiry > now() + this.config.expireOffsetSeconds) {
             return token
         } else {
             saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
@@ -954,7 +946,6 @@ export class Adal {
      * @returns {RequestInfo} an object created from the redirect response from AAD comprising of the keys - parameters, requestType, stateMatch, stateResponse and valid.
      */
     getRequestInfo(hash) {
-        const parameters = deserialize(getHash(hash)) as any
         const requestInfo = {
             valid: false,
             parameters: {},
@@ -963,6 +954,7 @@ export class Adal {
             requestType: RequestType.UNKNOWN,
         }
 
+        const parameters = deserialize(getHash(hash)) as any
         if (!parameters) {
             return requestInfo
         }
@@ -1558,14 +1550,15 @@ function getHash(hash: string) {
     }
     return hash
 }
+}
 
 /**
  * Checks if the URL fragment contains access token, id token or error_description.
  * @param {string} hash  -  Hash passed from redirect page
  * @returns {Boolean} true if response contains id_token, access_token or error, false otherwise.
  */
-function isCallback(hash: string) {
     const parameters = deserialize(getHash(hash))
+function isCallback(hash: string) {
     return (
         has(parameters, ERROR_DESCRIPTION) ||
         has(parameters, ACCESS_TOKEN) ||
@@ -1599,8 +1592,7 @@ function deserialize(query: string) {
  */
 function getResourceFromState(state) {
     if (state) {
-        var splitIndex = state.indexOf("|")
-
+        var splitIndex = state.indexOf(RESOURCE_DELIMETER)
         if (splitIndex > -1 && splitIndex + 1 < state.length) {
             return state.substring(splitIndex + 1)
         }
