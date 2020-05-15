@@ -1648,7 +1648,7 @@ export class Adal {
 function saveItem(key: string, value: any, preserve = false) {
     if (preserve) {
         const old = getItem(key) || ""
-        Storage.setItem(key, value + old + CACHE_DELIMETER)
+        Storage.setItem(key, old + value + CACHE_DELIMETER)
     } else {
         Storage.setItem(key, value)
     }
