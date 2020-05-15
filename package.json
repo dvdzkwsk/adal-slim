@@ -19,8 +19,19 @@
         "adal",
         "oauth"
     ],
-    "main": "./dist/adal.js",
+    "main": "dist/adal.js",
+    "umd:main": "dist/adal.umd.js",
+    "module": "dist/adal.module.js",
+    "source": "lib/adal.ts",
+    "types": "dist/adal.d.ts",
+    "files": [
+        "src",
+        "dist",
+        "README.md",
+        "LICENSE.txt"
+    ],
     "scripts": {
+        "build": "microbundle build",
         "format": "prettier . --write"
     },
     "prettier": {
@@ -30,8 +41,8 @@
         "trailingComma": "all"
     },
     "devDependencies": {
+        "microbundle": "^0.12.0",
         "prettier": "^2.0.5",
-        "terser": "^4.6.13",
         "typescript": "^3.9.2"
     }
 }

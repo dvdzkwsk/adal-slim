@@ -6,7 +6,7 @@
         "moduleResolution": "node",
         "lib": ["es2015", "dom"],
         "sourceMap": true,
-        "outDir": "dist",
+        "noEmit": true,
         "strictNullChecks": true,
         "strictPropertyInitialization": false,
         "skipLibCheck": true,
