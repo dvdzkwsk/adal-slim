@@ -1002,6 +1002,7 @@ export class Adal {
                 }
             }
         }
+        return requestInfo
     }
 
     /**
