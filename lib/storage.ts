@@ -13,7 +13,6 @@ export enum StorageKey {
     LOGIN_REQUEST = "adal.login.request",
     LOGIN_ERROR = "adal.login.error",
     RENEW_STATUS = "adal.token.renew.status",
-    ANGULAR_LOGIN_REQUEST = "adal.angular.login.request",
 }
 
 interface IStorage {

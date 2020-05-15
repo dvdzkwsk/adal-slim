@@ -95,16 +95,10 @@ export class Adal {
         this._loginInProgress = true
 
         // Token is not present and user needs to login
-        var expectedState = guid()
+        const expectedState = guid()
+        const loginStartPage = window.location.href
         this.config.state = expectedState
         this._idTokenNonce = guid()
-        var loginStartPage = getItem(StorageKey.ANGULAR_LOGIN_REQUEST)
-
-        if (!loginStartPage || loginStartPage === "") {
-            loginStartPage = window.location.href
-        } else {
-            saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
-        }
 
         this.logger.verbose(
             "Expected state: " + expectedState + " startPage:" + loginStartPage,
@@ -765,7 +759,6 @@ export class Adal {
      */
     clearCache() {
         saveItem(StorageKey.LOGIN_REQUEST, "")
-        saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
         saveItem(StorageKey.SESSION_STATE, "")
         saveItem(StorageKey.STATE_LOGIN, "")
         saveItem(StorageKey.STATE_RENEW, "")
