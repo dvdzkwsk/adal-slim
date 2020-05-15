@@ -380,7 +380,7 @@ export class Adal {
         // use given resource to create new authz url
         this.logger.info("renewToken is called for resource:" + resource)
         var frameHandle = this._addAdalFrame("adalRenewFrame" + resource)
-        var expectedState = guid() + "|" + resource
+        var expectedState = guid() + RESOURCE_DELIMETER + resource
         this.config.state = expectedState
         // renew happens in iframe, so it keeps javascript context
         this._renewStates.push(expectedState)
@@ -418,7 +418,7 @@ export class Adal {
         // use iframe to try to renew token
         this.logger.info("renewIdToken is called")
         let frameHandle = this._addAdalFrame("adalIdTokenFrame")
-        let expectedState = guid() + "|" + this.config.clientId
+        let expectedState = guid() + RESOURCE_DELIMETER + this.config.clientId
         this._idTokenNonce = guid()
         saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
         this.config.state = expectedState
@@ -625,7 +625,7 @@ export class Adal {
             return
         }
 
-        var expectedState = guid() + "|" + resource
+        var expectedState = guid() + RESOURCE_DELIMETER + resource
         this.config.state = expectedState
         this._renewStates.push(expectedState)
         this._requestType = RequestType.RENEW_TOKEN
@@ -667,7 +667,7 @@ export class Adal {
             return
         }
 
-        const expectedState = guid() + "|" + resource
+        const expectedState = guid() + RESOURCE_DELIMETER + resource
         this.config.state = expectedState
         this.logger.verbose("Renew token Expected state: " + expectedState)
 
