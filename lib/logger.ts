@@ -14,10 +14,10 @@ const LOG_LEVEL_LABELS = {
     [LogLevel.Verbose]: "VERBOSE",
 }
 
-export class Logger {
-    pii = false
-    correlationId: string | undefined
-    level = LogLevel.Error
+export const Logger = {
+    pii: false,
+    correlationId: undefined,
+    level: LogLevel.Error,
 
     /**
      * Checks the Logging Level, constructs the Log message and logs it. Users need to implement/override this method to turn on Logging.
@@ -52,7 +52,7 @@ export class Logger {
 
             console.log(formattedMessage)
         }
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 0.
@@ -61,7 +61,7 @@ export class Logger {
      */
     error(message: string, error?: Error) {
         this.log(LogLevel.Error, message, error)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 1.
@@ -69,7 +69,7 @@ export class Logger {
      */
     warn(message: string) {
         this.log(LogLevel.Warn, message, null)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 2.
@@ -77,7 +77,7 @@ export class Logger {
      */
     info(message: string) {
         this.log(LogLevel.Info, message, null)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 3.
@@ -85,7 +85,7 @@ export class Logger {
      */
     verbose(message: string) {
         this.log(LogLevel.Verbose, message, null)
-    }
+    },
 
     /**
      * Logs Pii messages when Logging Level is set to 0 and window.piiLoggingEnabled is set to true.
@@ -94,7 +94,7 @@ export class Logger {
      */
     errorPii(message: string, error: string) {
         this.log(LogLevel.Error, message, error, true)
-    }
+    },
 
     /**
      * Logs  Pii messages when Logging Level is set to 1 and window.piiLoggingEnabled is set to true.
@@ -102,7 +102,7 @@ export class Logger {
      */
     warnPii(message: string) {
         this.log(LogLevel.Warn, message, null, true)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 2 and window.piiLoggingEnabled is set to true.
@@ -110,7 +110,7 @@ export class Logger {
      */
     infoPii(message: string) {
         this.log(LogLevel.Info, message, null, true)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 3 and window.piiLoggingEnabled is set to true.
@@ -118,5 +118,5 @@ export class Logger {
      */
     verbosePii(message: string) {
         this.log(LogLevel.Verbose, message, null, true)
-    }
+    },
 }
