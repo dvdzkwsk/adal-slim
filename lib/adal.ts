@@ -1210,13 +1210,7 @@ export class Adal {
      * This method must be called for processing the response received from AAD. It extracts the hash, processes the token or error, saves it in the cache and calls the registered callbacks with the result.
      * @param {string} [hash=window.location.hash] - Hash fragment of Url.
      */
-    handleWindowCallback(hash: string) {
-        // This is for regular javascript usage for redirect handling
-        // need to make sure this is for callback
-        if (hash == null) {
-            hash = window.location.hash
-        }
-
+    handleWindowCallback(hash: string = window.location.hash) {
         if (isCallback(hash)) {
             var self: Adal = null as any
             var isPopup = false
