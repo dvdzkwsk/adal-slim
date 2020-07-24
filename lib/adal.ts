@@ -18,7 +18,6 @@
 //----------------------------------------------------------------------
 import {Storage, StorageKey} from "./storage"
 import {Logger} from "./logger"
-import {VERSION} from "./version"
 
 enum RequestType {
     LOGIN = "LOGIN",
@@ -79,7 +78,9 @@ export class Adal {
             callback: () => {},
             ...options,
         }
-        Logger.correlationId = options.correlationId
+        if (DEBUG) {
+            Logger.correlationId = options.correlationId
+        }
         ;(window as any)._adalInstance = this
     }
 
@@ -88,7 +89,9 @@ export class Adal {
      */
     login() {
         if (this._loginInProgress) {
-            Logger.info("Login in progress")
+            if (DEBUG) {
+                Logger.info("Login in progress")
+            }
             return
         }
 
@@ -100,9 +103,14 @@ export class Adal {
         this.config.state = expectedState
         this._idTokenNonce = guid()
 
-        Logger.verbose(
-            "Expected state: " + expectedState + " startPage:" + loginStartPage,
-        )
+        if (DEBUG) {
+            Logger.verbose(
+                "Expected state: " +
+                    expectedState +
+                    " startPage:" +
+                    loginStartPage,
+            )
+        }
         saveItem(StorageKey.LOGIN_REQUEST, loginStartPage)
         saveItem(StorageKey.LOGIN_ERROR, "")
         saveItem(StorageKey.STATE_LOGIN, expectedState, true)
@@ -164,7 +172,9 @@ export class Adal {
 
             return popupWindow
         } catch (e) {
-            Logger.warn("Error opening popup, " + e.message)
+            if (DEBUG) {
+                Logger.warn("Error opening popup, " + e.message)
+            }
             this._loginInProgress = false
             this._acquireTokenInProgress = false
             return null
@@ -178,7 +188,9 @@ export class Adal {
         errorDesc: string,
         loginError: string,
     ) {
-        Logger.warn(errorDesc)
+        if (DEBUG) {
+            Logger.warn(errorDesc)
+        }
         saveItem(StorageKey.ERROR, error)
         saveItem(StorageKey.ERROR_DESCRIPTION, errorDesc)
         saveItem(StorageKey.LOGIN_ERROR, loginError)
@@ -252,7 +264,9 @@ export class Adal {
                     clearInterval(pollTimer)
                     this._loginInProgress = false
                     this._acquireTokenInProgress = false
-                    Logger.info("Closing popup window")
+                    if (DEBUG) {
+                        Logger.info("Closing popup window")
+                    }
                     this._openedWindows = []
                     popupWindow.close()
                     return
@@ -356,7 +370,9 @@ export class Adal {
                             tokenType,
                         )
                     } catch (error) {
-                        Logger.warn(error)
+                        if (DEBUG) {
+                            Logger.warn(error)
+                        }
                     }
                 }
 
@@ -377,13 +393,17 @@ export class Adal {
     _renewToken(resource, callback, responseType = "token") {
         // use iframe to try to renew token
         // use given resource to create new authz url
-        Logger.info("renewToken is called for resource:" + resource)
+        if (DEBUG) {
+            Logger.info("renewToken is called for resource:" + resource)
+        }
         var frameHandle = this._addAdalFrame("adalRenewFrame" + resource)
         var expectedState = guid() + RESOURCE_DELIMETER + resource
         this.config.state = expectedState
         // renew happens in iframe, so it keeps javascript context
         this._renewStates.push(expectedState)
-        Logger.verbose("Renew token Expected state: " + expectedState)
+        if (DEBUG) {
+            Logger.verbose("Renew token Expected state: " + expectedState)
+        }
         // remove the existing prompt=... query parameter and add prompt=none
         var urlNavigate = this._urlRemoveQueryStringParameter(
             this._getNavigateUrl(responseType, resource),
@@ -399,7 +419,9 @@ export class Adal {
         urlNavigate = urlNavigate + "&prompt=none"
         urlNavigate = this._addHintParameters(urlNavigate)
         this.registerCallback(expectedState, resource, callback)
-        Logger.verbosePii("Navigate to:" + urlNavigate)
+        if (DEBUG) {
+            Logger.verbosePii("Navigate to:" + urlNavigate)
+        }
         // @ts-expect-error
         frameHandle.src = "about:blank"
         this._loadFrameTimeout(
@@ -415,7 +437,9 @@ export class Adal {
      */
     _renewIdToken(callback, responseType?: string) {
         // use iframe to try to renew token
-        Logger.info("renewIdToken is called")
+        if (DEBUG) {
+            Logger.info("renewIdToken is called")
+        }
         let frameHandle = this._addAdalFrame("adalIdTokenFrame")
         let expectedState = guid() + RESOURCE_DELIMETER + this.config.clientId
         this._idTokenNonce = guid()
@@ -423,7 +447,9 @@ export class Adal {
         this.config.state = expectedState
         // renew happens in iframe, so it keeps javascript context
         this._renewStates.push(expectedState)
-        Logger.verbose("Renew Idtoken Expected state: " + expectedState)
+        if (DEBUG) {
+            Logger.verbose("Renew Idtoken Expected state: " + expectedState)
+        }
         // remove the existing prompt=... query parameter and add prompt=none
         let resource = responseType || this.config.clientId
         responseType = responseType || "id_token"
@@ -435,7 +461,9 @@ export class Adal {
         urlNavigate = this._addHintParameters(urlNavigate)
         urlNavigate += "&nonce=" + encodeURIComponent(this._idTokenNonce)
         this.registerCallback(expectedState, this.config.clientId, callback)
-        Logger.verbosePii("Navigate to:" + urlNavigate)
+        if (DEBUG) {
+            Logger.verbosePii("Navigate to:" + urlNavigate)
+        }
         // @ts-expect-error
         frameHandle.src = "about:blank"
         this._loadFrameTimeout(
@@ -480,7 +508,9 @@ export class Adal {
      */
     _loadFrameTimeout = function (urlNavigation, frameName, resource) {
         //set iframe session to pending
-        Logger.verbose("Set loading state to pending for: " + resource)
+        if (DEBUG) {
+            Logger.verbose("Set loading state to pending for: " + resource)
+        }
         saveItem(
             StorageKey.RENEW_STATUS + resource,
             TokenRenewStatus.InProgress,
@@ -493,12 +523,14 @@ export class Adal {
                 TokenRenewStatus.InProgress
             ) {
                 // fail the iframe session if it's in pending state
-                Logger.verbose(
-                    "Loading frame has timed out after: " +
-                        this.config.loadFrameTimeout / 1000 +
-                        " seconds for resource " +
-                        resource,
-                )
+                if (DEBUG) {
+                    Logger.verbose(
+                        "Loading frame has timed out after: " +
+                            this.config.loadFrameTimeout / 1000 +
+                            " seconds for resource " +
+                            resource,
+                    )
+                }
                 var expectedState = this._activeRenewals[resource]
 
                 if (
@@ -527,7 +559,9 @@ export class Adal {
     _loadFrame(urlNavigate, frameName) {
         // This trick overcomes iframe navigation in IE
         // IE does not load the page consistently in iframe
-        Logger.info("LoadFrame: " + frameName)
+        if (DEBUG) {
+            Logger.info("LoadFrame: " + frameName)
+        }
         setTimeout(() => {
             var frameHandle = this._addAdalFrame(frameName) as any
             if (frameHandle.src === "" || frameHandle.src === "about:blank") {
@@ -552,7 +586,9 @@ export class Adal {
     acquireToken(resource, callback) {
         if (!resource) {
             const error = "resource is required"
-            Logger.warn(error)
+            if (DEBUG) {
+                Logger.warn(error)
+            }
             callback(error, null, error)
             return
         }
@@ -560,7 +596,11 @@ export class Adal {
         var token = this.getCachedToken(resource)
 
         if (token) {
-            Logger.info("Token is already in cache for resource:" + resource)
+            if (DEBUG) {
+                Logger.info(
+                    "Token is already in cache for resource:" + resource,
+                )
+            }
             callback(null, token, null)
             return
         }
@@ -573,7 +613,9 @@ export class Adal {
             )
         ) {
             const error = "User login is required"
-            Logger.warn(error)
+            if (DEBUG) {
+                Logger.warn(error)
+            }
             callback(error, null, error)
             return
         }
@@ -593,18 +635,26 @@ export class Adal {
                 // App uses idtoken to send to api endpoints
                 // Default resource is tracked as clientid to store this token
                 if (this._user) {
-                    Logger.verbose("renewing idtoken")
+                    if (DEBUG) {
+                        Logger.verbose("renewing idtoken")
+                    }
                     this._renewIdToken(callback)
                 } else {
-                    Logger.verbose("renewing idtoken and access_token")
+                    if (DEBUG) {
+                        Logger.verbose("renewing idtoken and access_token")
+                    }
                     this._renewIdToken(callback, ResponseType.ID_TOKEN)
                 }
             } else {
                 if (this._user) {
-                    Logger.verbose("renewing access_token")
+                    if (DEBUG) {
+                        Logger.verbose("renewing access_token")
+                    }
                     this._renewToken(resource, callback)
                 } else {
-                    Logger.verbose("renewing idtoken and access_token")
+                    if (DEBUG) {
+                        Logger.verbose("renewing idtoken and access_token")
+                    }
                     this._renewToken(resource, callback, ResponseType.ID_TOKEN)
                 }
             }
@@ -626,7 +676,9 @@ export class Adal {
         this.config.state = expectedState
         this._renewStates.push(expectedState)
         this._requestType = RequestType.RENEW_TOKEN
-        Logger.verbose("Renew token Expected state: " + expectedState)
+        if (DEBUG) {
+            Logger.verbose("Renew token Expected state: " + expectedState)
+        }
         // remove the existing prompt=... query parameter and add prompt=select_account
         var urlNavigate = this._urlRemoveQueryStringParameter(
             this._getNavigateUrl("token", resource),
@@ -646,9 +698,12 @@ export class Adal {
 
         urlNavigate = this._addHintParameters(urlNavigate)
         this._acquireTokenInProgress = true
-        Logger.info(
-            "acquireToken interactive is called for the resource " + resource,
-        )
+        if (DEBUG) {
+            Logger.info(
+                "acquireToken interactive is called for the resource " +
+                    resource,
+            )
+        }
         this.registerCallback(expectedState, resource, callback)
         this._loginPopup(urlNavigate, resource, callback)
     }
@@ -666,7 +721,9 @@ export class Adal {
 
         const expectedState = guid() + RESOURCE_DELIMETER + resource
         this.config.state = expectedState
-        Logger.verbose("Renew token Expected state: " + expectedState)
+        if (DEBUG) {
+            Logger.verbose("Renew token Expected state: " + expectedState)
+        }
 
         // remove the existing prompt=... query parameter and add prompt=select_account
         var urlNavigate = this._urlRemoveQueryStringParameter(
@@ -686,9 +743,12 @@ export class Adal {
 
         urlNavigate = this._addHintParameters(urlNavigate)
         this._acquireTokenInProgress = true
-        Logger.info(
-            "acquireToken interactive is called for the resource " + resource,
-        )
+        if (DEBUG) {
+            Logger.info(
+                "acquireToken interactive is called for the resource " +
+                    resource,
+            )
+        }
         saveItem(StorageKey.LOGIN_REQUEST, window.location.href)
         saveItem(StorageKey.STATE_RENEW, expectedState, true)
         this.promptUser(urlNavigate)
@@ -704,7 +764,9 @@ export class Adal {
             error = "Acquire token interactive is already in progress"
         }
         if (error) {
-            Logger.warn(error)
+            if (DEBUG) {
+                Logger.warn(error)
+            }
             this.config.callback(error, null, error)
             return false
         }
@@ -717,10 +779,14 @@ export class Adal {
      */
     promptUser(urlNavigate: string) {
         if (urlNavigate) {
-            Logger.infoPii("Navigate to:" + urlNavigate)
+            if (DEBUG) {
+                Logger.infoPii("Navigate to:" + urlNavigate)
+            }
             window.location.replace(urlNavigate)
         } else {
-            Logger.info("Navigate url is empty")
+            if (DEBUG) {
+                Logger.info("Navigate url is empty")
+            }
         }
     }
 
@@ -793,7 +859,9 @@ export class Adal {
                 logout
         }
 
-        Logger.infoPii("Logout navigate to: " + urlNavigate)
+        if (DEBUG) {
+            Logger.infoPii("Logout navigate to: " + urlNavigate)
+        }
         this.promptUser(urlNavigate)
     }
 
@@ -875,7 +943,9 @@ export class Adal {
         }
 
         if (json.aud.toLowerCase() !== this.config.clientId.toLowerCase()) {
-            Logger.warn("IdToken has invalid aud field")
+            if (DEBUG) {
+                Logger.warn("IdToken has invalid aud field")
+            }
         } else {
             return {
                 userName: json.upn || json.email,
@@ -930,10 +1000,14 @@ export class Adal {
 
             // which call
             if (parameters.hasOwnProperty("state")) {
-                Logger.verbose("State: " + parameters.state)
+                if (DEBUG) {
+                    Logger.verbose("State: " + parameters.state)
+                }
                 requestInfo.stateResponse = parameters.state
             } else {
-                Logger.warn("No state returned")
+                if (DEBUG) {
+                    Logger.warn("No state returned")
+                }
                 return requestInfo
             }
 
@@ -1008,12 +1082,14 @@ export class Adal {
      * Saves token or error received in the response from AAD in the cache. In case of id_token, it also creates the user object.
      */
     saveTokenFromHash(requestInfo) {
-        Logger.info(
-            "State status:" +
-                requestInfo.stateMatch +
-                "; Request type:" +
-                requestInfo.requestType,
-        )
+        if (DEBUG) {
+            Logger.info(
+                "State status:" +
+                    requestInfo.stateMatch +
+                    "; Request type:" +
+                    requestInfo.requestType,
+            )
+        }
         saveItem(StorageKey.ERROR, "")
         saveItem(StorageKey.ERROR_DESCRIPTION, "")
 
@@ -1044,7 +1120,9 @@ export class Adal {
             // It must verify the state from redirect
             if (requestInfo.stateMatch) {
                 // record tokens to storage if exists
-                Logger.info("State is right")
+                if (DEBUG) {
+                    Logger.info("State is right")
+                }
                 if (requestInfo.parameters.hasOwnProperty(SESSION_STATE)) {
                     saveItem(
                         StorageKey.SESSION_STATE,
@@ -1055,7 +1133,9 @@ export class Adal {
                 var keys
 
                 if (requestInfo.parameters.hasOwnProperty(ACCESS_TOKEN)) {
-                    Logger.info("Fragment has access token")
+                    if (DEBUG) {
+                        Logger.info("Fragment has access token")
+                    }
 
                     if (!this._hasResource(resource)) {
                         keys = getItem(StorageKey.TOKEN_KEYS) || ""
@@ -1251,11 +1331,17 @@ export class Adal {
                 window.parent
             ) {
                 if (window.parent !== window) {
-                    Logger.verbose(
-                        "Window is in iframe, acquiring token silently",
-                    )
+                    if (DEBUG) {
+                        Logger.verbose(
+                            "Window is in iframe, acquiring token silently",
+                        )
+                    }
                 } else {
-                    Logger.verbose("acquiring token interactive in progress")
+                    if (DEBUG) {
+                        Logger.verbose(
+                            "acquiring token interactive in progress",
+                        )
+                    }
                 }
 
                 token =
@@ -1274,9 +1360,12 @@ export class Adal {
                     tokenReceivedCallback(errorDesc, token, error, tokenType)
                 }
             } catch (err) {
-                Logger.error(
-                    "Error occurred in user defined callback function: " + err,
-                )
+                if (DEBUG) {
+                    Logger.error(
+                        "Error occurred in user defined callback function: " +
+                            err,
+                    )
+                }
             }
 
             if (window.parent === window && !isPopup) {
@@ -1298,10 +1387,10 @@ export class Adal {
             this.config.instance +
             this.config.tenant +
             "/oauth2/authorize" +
-            this._serialize(responseType, this.config, resource) +
-            "&x-client-SKU=Js&x-client-Ver=" +
-            VERSION
-        Logger.info("Navigate url:" + urlNavigate)
+            this._serialize(responseType, this.config, resource)
+        if (DEBUG) {
+            Logger.info("Navigate url:" + urlNavigate)
+        }
         return urlNavigate
     }
 
@@ -1322,16 +1411,20 @@ export class Adal {
             var base64Decoded = this._base64DecodeStringUrlSafe(base64IdToken)
 
             if (!base64Decoded) {
-                Logger.info(
-                    "The returned id_token could not be base64 url safe decoded.",
-                )
+                if (DEBUG) {
+                    Logger.info(
+                        "The returned id_token could not be base64 url safe decoded.",
+                    )
+                }
                 return
             }
 
             // ECMA script has JSON built-in support
             return JSON.parse(base64Decoded)
         } catch (err) {
-            Logger.error("The returned id_token could not be decoded", err)
+            if (DEBUG) {
+                Logger.error("The returned id_token could not be decoded", err)
+            }
         }
     }
 
@@ -1431,7 +1524,9 @@ export class Adal {
             return
         }
 
-        Logger.info("Add adal frame to document:" + iframeId)
+        if (DEBUG) {
+            Logger.info("Add adal frame to document:" + iframeId)
+        }
         var adalFrame = document.getElementById(iframeId)
 
         if (!adalFrame) {

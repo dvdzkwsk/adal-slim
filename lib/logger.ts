@@ -1,5 +1,3 @@
-import {VERSION} from "./version"
-
 export enum LogLevel {
     Error = 0,
     Warn,
@@ -39,8 +37,6 @@ export const Logger = {
                 timestamp +
                 ":" +
                 (this.correlationId ? this.correlationId + "-" : "") +
-                VERSION +
-                "-" +
                 LOG_LEVEL_LABELS[level] +
                 ": " +
                 message

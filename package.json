@@ -1,5 +1,5 @@
 {
-    "name": "adal-angular",
+    "name": "adal",
     "author": {
         "name": "Microsoft",
         "email": "nugetaad@microsoft.com",
@@ -20,18 +20,19 @@
         "oauth"
     ],
     "main": "dist/adal.js",
-    "umd:main": "dist/adal.umd.js",
-    "module": "dist/adal.module.js",
+    "module": "dist/adal.modern.js",
     "source": "lib/adal.ts",
     "types": "dist/adal.d.ts",
     "files": [
-        "src",
+        "lib",
         "dist",
         "README.md",
         "LICENSE.txt"
     ],
     "scripts": {
-        "build": "microbundle build",
+        "build": "yarn build-prod && yarn build-debug",
+        "build-prod": "microbundle build --format modern --define DEBUG=false",
+        "build-debug": "microbundle build --format modern --define DEBUG=true --output dist/debug",
         "format": "prettier . --write"
     },
     "prettier": {
@@ -41,8 +42,8 @@
         "trailingComma": "all"
     },
     "devDependencies": {
-        "microbundle": "^0.12.0",
+        "microbundle": "^0.12.3",
         "prettier": "^2.0.5",
-        "typescript": "^3.9.2"
+        "typescript": "^3.9.7"
     }
 }

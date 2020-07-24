@@ -4,9 +4,9 @@ export declare enum LogLevel {
     Info = 2,
     Verbose = 3
 }
-export declare class Logger {
+export declare const Logger: {
     pii: boolean;
-    correlationId: string | undefined;
+    correlationId: undefined;
     level: LogLevel;
     /**
      * Checks the Logging Level, constructs the Log message and logs it. Users need to implement/override this method to turn on Logging.
@@ -20,7 +20,7 @@ export declare class Logger {
      * @param {string} message  -  Message to log.
      * @param {string} error  -  Error to log.
      */
-    error(message: string, error?: Error): void;
+    error(message: string, error?: Error | undefined): void;
     /**
      * Logs messages when Logging Level is set to 1.
      * @param {string} message  -  Message to log.
@@ -57,4 +57,4 @@ export declare class Logger {
      * @param {string} message  -  Message to log.
      */
     verbosePii(message: string): void;
-}
+};

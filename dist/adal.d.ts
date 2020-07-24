@@ -1,4 +1,3 @@
-import { Logger } from "./logger";
 declare enum RequestType {
     LOGIN = "LOGIN",
     RENEW_TOKEN = "RENEW_TOKEN",
@@ -8,7 +7,6 @@ declare type Config = any;
 declare type Options = any;
 export declare class Adal {
     config: Config;
-    logger: Logger;
     _user: any;
     _idTokenNonce: any;
     _activeRenewals: any;
@@ -211,7 +209,7 @@ export declare class Adal {
      * This method must be called for processing the response received from AAD. It extracts the hash, processes the token or error, saves it in the cache and calls the registered callbacks with the result.
      * @param {string} [hash=window.location.hash] - Hash fragment of Url.
      */
-    handleWindowCallback(hash: string): void;
+    handleWindowCallback(hash?: string): void;
     /**
      * Constructs the authorization endpoint URL and returns it.
      * @ignore
