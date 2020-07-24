@@ -48,12 +48,11 @@ type Config = any
 type Options = any
 export class Adal {
     config: Config
+    loginInProgress = false
 
-    // TODO: move off of instance for smaller property names
     _user: any
     _idTokenNonce: any
     _activeRenewals: any = {}
-    _loginInProgress = false
     _acquireTokenInProgress = false
     _renewStates: any[] = []
     _openedWindows: any[] = []
@@ -88,14 +87,14 @@ export class Adal {
      * Initiates the login process by redirecting the user to Azure AD authorization endpoint.
      */
     login() {
-        if (this._loginInProgress) {
+        if (this.loginInProgress) {
             if (DEBUG) {
                 Logger.info("Login in progress")
             }
             return
         }
 
-        this._loginInProgress = true
+        this.loginInProgress = true
 
         // Token is not present and user needs to login
         const expectedState = guid()
@@ -175,7 +174,7 @@ export class Adal {
             if (DEBUG) {
                 Logger.warn("Error opening popup, " + e.message)
             }
-            this._loginInProgress = false
+            this.loginInProgress = false
             this._acquireTokenInProgress = false
             return null
         }
@@ -199,7 +198,7 @@ export class Adal {
             this._activeRenewals[resource] = null
         }
 
-        this._loginInProgress = false
+        this.loginInProgress = false
         this._acquireTokenInProgress = false
 
         if (loginCallback) {
@@ -262,7 +261,7 @@ export class Adal {
                 ) {
                     this.handleWindowCallback(popUpWindowLocation.hash)
                     clearInterval(pollTimer)
-                    this._loginInProgress = false
+                    this.loginInProgress = false
                     this._acquireTokenInProgress = false
                     if (DEBUG) {
                         Logger.info("Closing popup window")
@@ -275,27 +274,13 @@ export class Adal {
         }, 1)
     }
 
-    loginInProgress() {
-        return this._loginInProgress
-    }
-
-    /**
-     * Checks for the resource in the cache. By default, cache location is Session Storage
-     * @ignore
-     * @returns {Boolean} 'true' if login is in progress, else returns 'false'.
-     */
-    _hasResource(key) {
-        var keys = getItem(StorageKey.TOKEN_KEYS)
-        return !isEmpty(keys) && keys.indexOf(key + RESOURCE_DELIMETER) > -1
-    }
-
     /**
      * Gets token for the specified resource from the cache.
      * @param {string}   resource A URI that identifies the resource for which the token is requested.
      * @returns {string} token if if it exists and not expired, otherwise null.
      */
     getCachedToken(resource: string): string | undefined {
-        if (!this._hasResource(resource)) return
+        if (!hasResource(resource)) return
 
         const token = getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
         const expiry = getItem(StorageKey.EXPIRATION_KEY + resource)
@@ -581,8 +566,7 @@ export class Adal {
             return
         }
 
-        var token = this.getCachedToken(resource)
-
+        const token = this.getCachedToken(resource)
         if (token) {
             if (DEBUG) {
                 Logger.info(
@@ -815,7 +799,7 @@ export class Adal {
         saveItem(StorageKey.ERROR, "")
         saveItem(StorageKey.ERROR_DESCRIPTION, "")
 
-        if (this._hasResource(resource)) {
+        if (hasResource(resource)) {
             saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
             saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
         }
@@ -855,7 +839,7 @@ export class Adal {
 
     /**
      * If user object exists, returns it. Else creates a new user object by decoding id_token from the cache.
-     * 
+     *
      * @deprecated
      */
     getUser() {
@@ -1088,7 +1072,7 @@ export class Adal {
             )
 
             if (requestInfo.requestType === RequestType.LOGIN) {
-                this._loginInProgress = false
+                this.loginInProgress = false
                 saveItem(
                     StorageKey.LOGIN_ERROR,
                     requestInfo.parameters.error_description,
@@ -1115,7 +1099,7 @@ export class Adal {
                         Logger.info("Fragment has access token")
                     }
 
-                    if (!this._hasResource(resource)) {
+                    if (!hasResource(resource)) {
                         keys = getItem(StorageKey.TOKEN_KEYS) || ""
                         saveItem(
                             StorageKey.TOKEN_KEYS,
@@ -1136,7 +1120,7 @@ export class Adal {
 
                 if (requestInfo.parameters.hasOwnProperty(ID_TOKEN)) {
                     // this.info("Fragment has id token")
-                    this._loginInProgress = false
+                    this.loginInProgress = false
                     this._user = this._createUser(
                         requestInfo.parameters[ID_TOKEN],
                     )
@@ -1161,7 +1145,7 @@ export class Adal {
                                 ? this.config.loginResource
                                 : this.config.clientId
 
-                            if (!this._hasResource(resource)) {
+                            if (!hasResource(resource)) {
                                 keys = getItem(StorageKey.TOKEN_KEYS) || ""
                                 saveItem(
                                     StorageKey.TOKEN_KEYS,
@@ -1254,8 +1238,14 @@ export class Adal {
             let self!: Adal
             let isPopup
 
-            const lastWindow = this._openedWindows[this._openedWindows.length  -1]
-            if (lastWindow && lastWindow.opener && lastWindow.opener._adalInstance) {
+            const lastWindow = this._openedWindows[
+                this._openedWindows.length - 1
+            ]
+            if (
+                lastWindow &&
+                lastWindow.opener &&
+                lastWindow.opener._adalInstance
+            ) {
                 self = lastWindow.opener._adalInstance
                 isPopup = true
             } else if (window.parent && (window.parent as any)._adalInstance) {
@@ -1644,4 +1634,14 @@ function guid() {
         buffer[14] +
         buffer[15]
     )
+}
+
+/**
+ * Checks for the resource in the cache. By default, cache location is Session Storage
+ * @ignore
+ * @returns {Boolean} 'true' if login is in progress, else returns 'false'.
+ */
+function hasResource(key: string): boolean {
+    const keys = getItem(StorageKey.TOKEN_KEYS)
+    return !isEmpty(keys) && keys.indexOf(key + RESOURCE_DELIMETER) > -1
 }
