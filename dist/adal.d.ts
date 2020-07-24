@@ -46,7 +46,7 @@ export declare class Adal {
      * @param {string}   resource A URI that identifies the resource for which the token is requested.
      * @returns {string} token if if it exists and not expired, otherwise null.
      */
-    getCachedToken(resource: string): any;
+    getCachedToken(resource: string): string | undefined;
     /**
      * User information from idtoken.
      *  @class User
@@ -54,8 +54,7 @@ export declare class Adal {
      *  @property {object} profile - properties parsed from idtoken.
      */
     /**
-     * If user object exists, returns it. Else creates a new user object by decoding id_token from the cache.
-     * @returns {User} user object
+     * @deprecated
      */
     getCachedUser(): any;
     /**
@@ -79,16 +78,16 @@ export declare class Adal {
      * Checks if the authorization endpoint URL contains query string parameters
      * @ignore
      */
-    _urlContainsQueryStringParameter: (name: any, url: any) => boolean;
+    _urlContainsQueryStringParameter(name: any, url: any): boolean;
     /**
      * Removes the query string parameter from the authorization endpoint URL if it exists
      * @ignore
      */
-    _urlRemoveQueryStringParameter: (url: any, name: any) => any;
+    _urlRemoveQueryStringParameter(url: any, name: any): any;
     /**
      * @ignore
      */
-    _loadFrameTimeout: (urlNavigation: any, frameName: any, resource: any) => void;
+    _loadFrameTimeout(urlNavigation: any, frameName: any, resource: any): void;
     /**
      * Loads iframe with authorization endpoint URL
      * @ignore
@@ -120,7 +119,7 @@ export declare class Adal {
      * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
      */
     acquireTokenRedirect(resource: any, extraQueryParameters: any, claims: any): void;
-    ensureCanAcquireToken(resource: string): boolean;
+    _canAcquireToken(resource: string): boolean;
     /**
      * Redirects the browser to Azure AD authorization endpoint.
      * @param {string}   urlNavigate  Url of the authorization endpoint.
@@ -140,13 +139,18 @@ export declare class Adal {
      * After logout, it will redirect to postLogoutRedirectUri if added as a property on the config object.
      */
     logOut(): void;
+    /**
+     * If user object exists, returns it. Else creates a new user object by decoding id_token from the cache.
+     *
+     * @deprecated
+     */
     getUser(): any;
     /**
      * Adds login_hint to authorization URL which is used to pre-fill the username field of sign in page for the user if known ahead of time.
      * domain_hint can be one of users/organisations which when added skips the email based discovery process of the user.
      * @ignore
      */
-    _addHintParameters: (urlNavigate: any) => any;
+    _addHintParameters(urlNavigate: any): any;
     /**
      * Creates a user object by decoding the id_token
      * @ignore
@@ -181,11 +185,6 @@ export declare class Adal {
         requestType: RequestType;
     };
     /**
-     * Matches nonce from the request with the response.
-     * @ignore
-     */
-    _matchNonce(user: any): boolean;
-    /**
      * Matches state from the request with the response.
      * @ignore
      */
@@ -196,15 +195,8 @@ export declare class Adal {
     saveTokenFromHash(requestInfo: any): void;
     /**
      * Gets resource for given endpoint if mapping is provided with config.
-     * @param {string} endpoint  -  The URI for which the resource Id is requested.
-     * @returns {string} resource for this API endpoint.
      */
-    getResourceForEndpoint(endpoint: string): any;
-    /**
-     * Strips the protocol part of the URL and returns it.
-     * @ignore
-     */
-    _getHostFromUri(uri: string): string;
+    getResourceForEndpoint(endpoint: string): string | undefined;
     /**
      * This method must be called for processing the response received from AAD. It extracts the hash, processes the token or error, saves it in the cache and calls the registered callbacks with the result.
      * @param {string} [hash=window.location.hash] - Hash fragment of Url.
@@ -233,26 +225,11 @@ export declare class Adal {
         header: string;
         JWSPayload: string;
         JWSSig: string;
-    } | null;
-    /**
-     * Converts string to represent binary data in ASCII string format by translating it into a radix-64 representation and returns it
-     * @ignore
-     */
-    _convertUrlSafeToRegularBase64EncodedString(str: string): string;
-    /**
-     * Serializes the parameters for the authorization endpoint URL and returns the serialized uri string.
-     * @ignore
-     */
-    _serialize(responseType: string, obj: any, resource?: string): string;
-    /**
-     * Calculates the expires in value in milliseconds for the acquired token
-     * @ignore
-     */
-    _expiresIn(expires: any): number;
+    } | undefined;
     /**
      * Adds the hidden iframe for silent token renewal
      * @ignore
      */
-    _addAdalFrame(iframeId: string): HTMLElement | null | undefined;
+    _addAdalFrame(iframeId: string): any;
 }
 export {};

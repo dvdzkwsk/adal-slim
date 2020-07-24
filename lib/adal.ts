@@ -294,10 +294,8 @@ export class Adal {
      * @param {string}   resource A URI that identifies the resource for which the token is requested.
      * @returns {string} token if if it exists and not expired, otherwise null.
      */
-    getCachedToken(resource: string) {
-        if (!this._hasResource(resource)) {
-            return null
-        }
+    getCachedToken(resource: string): string | undefined {
+        if (!this._hasResource(resource)) return
 
         const token = getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
         const expiry = getItem(StorageKey.EXPIRATION_KEY + resource)
@@ -307,7 +305,6 @@ export class Adal {
         } else {
             saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
             saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
-            return null
         }
     }
 
@@ -319,17 +316,10 @@ export class Adal {
      */
 
     /**
-     * If user object exists, returns it. Else creates a new user object by decoding id_token from the cache.
-     * @returns {User} user object
+     * @deprecated
      */
     getCachedUser() {
-        if (this._user) {
-            return this._user
-        }
-
-        var idtoken = getItem(StorageKey.IDTOKEN)
-        this._user = this._createUser(idtoken)
-        return this._user
+        return this.getUser()
     }
 
     /**
@@ -422,7 +412,6 @@ export class Adal {
         if (DEBUG) {
             Logger.verbosePii("Navigate to:" + urlNavigate)
         }
-        // @ts-expect-error
         frameHandle.src = "about:blank"
         this._loadFrameTimeout(
             urlNavigate,
@@ -464,7 +453,6 @@ export class Adal {
         if (DEBUG) {
             Logger.verbosePii("Navigate to:" + urlNavigate)
         }
-        // @ts-expect-error
         frameHandle.src = "about:blank"
         this._loadFrameTimeout(
             urlNavigate,
@@ -477,7 +465,7 @@ export class Adal {
      * Checks if the authorization endpoint URL contains query string parameters
      * @ignore
      */
-    _urlContainsQueryStringParameter = function (name, url) {
+    _urlContainsQueryStringParameter(name, url) {
         // regex to detect pattern of a ? or & followed by the name parameter and an equals character
         var regex = new RegExp("[\\?&]" + name + "=")
         return regex.test(url)
@@ -487,7 +475,7 @@ export class Adal {
      * Removes the query string parameter from the authorization endpoint URL if it exists
      * @ignore
      */
-    _urlRemoveQueryStringParameter = function (url, name) {
+    _urlRemoveQueryStringParameter(url, name) {
         // we remove &name=value, name=value& and name=value
         // &name=value
         var regex = new RegExp("(\\&" + name + "=)[^&]+")
@@ -506,7 +494,7 @@ export class Adal {
     /**
      * @ignore
      */
-    _loadFrameTimeout = function (urlNavigation, frameName, resource) {
+    _loadFrameTimeout(urlNavigation, frameName, resource) {
         //set iframe session to pending
         if (DEBUG) {
             Logger.verbose("Set loading state to pending for: " + resource)
@@ -563,8 +551,8 @@ export class Adal {
             Logger.info("LoadFrame: " + frameName)
         }
         setTimeout(() => {
-            var frameHandle = this._addAdalFrame(frameName) as any
-            if (frameHandle.src === "" || frameHandle.src === "about:blank") {
+            const frameHandle = this._addAdalFrame(frameName) as any
+            if (!frameHandle.src || frameHandle.src === "about:blank") {
                 frameHandle.src = urlNavigate
                 this._loadFrame(urlNavigate, frameName)
             }
@@ -668,7 +656,7 @@ export class Adal {
      * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
      */
     acquireTokenPopup(resource, extraQueryParameters, claims, callback) {
-        if (!this.ensureCanAcquireToken(resource)) {
+        if (!this._canAcquireToken(resource)) {
             return
         }
 
@@ -715,7 +703,7 @@ export class Adal {
      * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
      */
     acquireTokenRedirect(resource, extraQueryParameters, claims) {
-        if (!this.ensureCanAcquireToken(resource)) {
+        if (!this._canAcquireToken(resource)) {
             return
         }
 
@@ -754,7 +742,7 @@ export class Adal {
         this.promptUser(urlNavigate)
     }
 
-    ensureCanAcquireToken(resource: string): boolean {
+    _canAcquireToken(resource: string): boolean {
         let error: string | undefined
         if (!resource) {
             error = "Resource is required"
@@ -865,15 +853,19 @@ export class Adal {
         this.promptUser(urlNavigate)
     }
 
+    /**
+     * If user object exists, returns it. Else creates a new user object by decoding id_token from the cache.
+     * 
+     * @deprecated
+     */
     getUser() {
-        if (this._user) {
-            return this._user
+        if (!this._user) {
+            const idToken = getItem(StorageKey.IDTOKEN)
+            if (idToken) {
+                this._user = this._createUser(idToken)
+            }
         }
-
-        const idToken = getItem(StorageKey.IDTOKEN)
-        if (idToken) {
-            return (this._user = this._createUser(idToken))
-        }
+        return this._user
     }
 
     /**
@@ -881,7 +873,7 @@ export class Adal {
      * domain_hint can be one of users/organisations which when added skips the email based discovery process of the user.
      * @ignore
      */
-    _addHintParameters = function (urlNavigate) {
+    _addHintParameters(urlNavigate) {
         //If you dont use prompt=none, then if the session does not exist, there will be a failure.
         //If sid is sent alongside domain or login hints, there will be a failure since request is ambiguous.
         //If sid is sent with a prompt value other than none or attempt_none, there will be a failure since the request is ambiguous.
@@ -1033,22 +1025,6 @@ export class Adal {
     }
 
     /**
-     * Matches nonce from the request with the response.
-     * @ignore
-     */
-    _matchNonce(user) {
-        const requestNonce = getItem(StorageKey.NONCE_IDTOKEN)
-        if (requestNonce) {
-            for (const nonce of requestNonce.split(CACHE_DELIMETER)) {
-                if (nonce === user.profile.nonce) {
-                    return true
-                }
-            }
-        }
-        return false
-    }
-
-    /**
      * Matches state from the request with the response.
      * @ignore
      */
@@ -1097,12 +1073,14 @@ export class Adal {
 
         // Record error
         if (requestInfo.parameters.hasOwnProperty(ERROR_DESCRIPTION)) {
-            Logger.infoPii(
-                "Error :" +
-                    requestInfo.parameters.error +
-                    "; Error description:" +
-                    requestInfo.parameters[ERROR_DESCRIPTION],
-            )
+            if (DEBUG) {
+                Logger.infoPii(
+                    "Error :" +
+                        requestInfo.parameters.error +
+                        "; Error description:" +
+                        requestInfo.parameters[ERROR_DESCRIPTION],
+                )
+            }
             saveItem(StorageKey.ERROR, requestInfo.parameters.error)
             saveItem(
                 StorageKey.ERROR_DESCRIPTION,
@@ -1152,7 +1130,7 @@ export class Adal {
                     )
                     saveItem(
                         StorageKey.EXPIRATION_KEY + resource,
-                        this._expiresIn(requestInfo.parameters[EXPIRES_IN]),
+                        expiresIn(requestInfo.parameters[EXPIRES_IN]),
                     )
                 }
 
@@ -1163,7 +1141,7 @@ export class Adal {
                         requestInfo.parameters[ID_TOKEN],
                     )
                     if (this._user && this._user.profile) {
-                        if (!this._matchNonce(this._user)) {
+                        if (!matchNonce(this._user)) {
                             saveItem(
                                 StorageKey.LOGIN_ERROR,
                                 "Nonce received: " +
@@ -1230,21 +1208,19 @@ export class Adal {
 
     /**
      * Gets resource for given endpoint if mapping is provided with config.
-     * @param {string} endpoint  -  The URI for which the resource Id is requested.
-     * @returns {string} resource for this API endpoint.
      */
-    getResourceForEndpoint(endpoint: string) {
+    getResourceForEndpoint(endpoint: string): string | undefined {
         // if user specified list of anonymous endpoints, no need to send token to these endpoints, return null.
-        if (this.config && this.config.anonymousEndpoints) {
-            for (var i = 0; i < this.config.anonymousEndpoints.length; i++) {
+        if (this.config.anonymousEndpoints) {
+            for (let i = 0; i < this.config.anonymousEndpoints.length; i++) {
                 if (endpoint.indexOf(this.config.anonymousEndpoints[i]) > -1) {
-                    return null
+                    return
                 }
             }
         }
 
-        if (this.config && this.config.endpoints) {
-            for (var configEndpoint in this.config.endpoints) {
+        if (this.config.endpoints) {
+            for (const configEndpoint in this.config.endpoints) {
                 // configEndpoint is like /api/Todo requested endpoint can be /api/Todo/1
                 if (endpoint.indexOf(configEndpoint) > -1) {
                     return this.config.endpoints[configEndpoint]
@@ -1259,10 +1235,7 @@ export class Adal {
             endpoint.indexOf("http://") > -1 ||
             endpoint.indexOf("https://") > -1
         ) {
-            if (
-                this._getHostFromUri(endpoint) ===
-                this._getHostFromUri(this.config.redirectUri)
-            ) {
+            if (areSameHost(endpoint, this.config.redirectUri)) {
                 return this.config.loginResource
             }
         } else {
@@ -1270,20 +1243,6 @@ export class Adal {
             // if it's relative call, we'll treat it as app backend call.
             return this.config.loginResource
         }
-
-        // if not the app's own backend or not a domain listed in the endpoints structure
-        return null
-    }
-
-    /**
-     * Strips the protocol part of the URL and returns it.
-     * @ignore
-     */
-    _getHostFromUri(uri: string) {
-        // remove http:// or https:// from uri
-        var extractedUri = String(uri).replace(/^(https?:)\/\//, "")
-        extractedUri = extractedUri.split("/")[0]
-        return extractedUri
     }
 
     /**
@@ -1292,23 +1251,15 @@ export class Adal {
      */
     handleWindowCallback(hash: string = window.location.hash) {
         if (isCallback(hash)) {
-            var self: Adal = null as any
-            var isPopup = false
+            let self!: Adal
+            let isPopup
 
-            if (
-                this._openedWindows.length > 0 &&
-                this._openedWindows[this._openedWindows.length - 1].opener &&
-                this._openedWindows[this._openedWindows.length - 1].opener
-                    ._adalInstance
-            ) {
-                self = this._openedWindows[this._openedWindows.length - 1]
-                    .opener._adalInstance
+            const lastWindow = this._openedWindows[this._openedWindows.length  -1]
+            if (lastWindow && lastWindow.opener && lastWindow.opener._adalInstance) {
+                self = lastWindow.opener._adalInstance
                 isPopup = true
-            }
-            // @ts-ignore
-            else if (window.parent && window.parent._adalInstance) {
-                // @ts-ignore
-                self = window.parent._adalInstance
+            } else if (window.parent && (window.parent as any)._adalInstance) {
+                self = (window.parent as any)._adalInstance
             }
 
             let requestInfo = self.getRequestInfo(hash) as any
@@ -1321,7 +1272,6 @@ export class Adal {
                 tokenReceivedCallback = self.config.callback
             }
 
-            // self.info("Returned from redirect url")
             self.saveTokenFromHash(requestInfo)
 
             let token: any
@@ -1330,14 +1280,12 @@ export class Adal {
                 requestInfo.requestType === RequestType.RENEW_TOKEN &&
                 window.parent
             ) {
-                if (window.parent !== window) {
-                    if (DEBUG) {
+                if (DEBUG) {
+                    if (window.parent !== window) {
                         Logger.verbose(
                             "Window is in iframe, acquiring token silently",
                         )
-                    }
-                } else {
-                    if (DEBUG) {
+                    } else {
                         Logger.verbose(
                             "acquiring token interactive in progress",
                         )
@@ -1387,7 +1335,7 @@ export class Adal {
             this.config.instance +
             this.config.tenant +
             "/oauth2/authorize" +
-            this._serialize(responseType, this.config, resource)
+            serialize(responseType, this.config, resource)
         if (DEBUG) {
             Logger.info("Navigate url:" + urlNavigate)
         }
@@ -1443,76 +1391,23 @@ export class Adal {
      */
     // Adal.node js crack function
     _decodeJwt(jwtToken: string) {
-        if (isEmpty(jwtToken)) {
-            return null
-        }
+        if (isEmpty(jwtToken)) return
 
         var idTokenPartsRegex = /^([^\.\s]*)\.([^\.\s]+)\.([^\.\s]*)$/
-
         var matches = idTokenPartsRegex.exec(jwtToken)
 
         if (!matches || matches.length < 4) {
-            Logger.warn("The returned id_token is not parseable.")
-            return null
+            if (DEBUG) {
+                Logger.warn("The returned id_token is not parseable.")
+            }
+            return
         }
 
-        var crackedToken = {
+        return {
             header: matches[1],
             JWSPayload: matches[2],
             JWSSig: matches[3],
         }
-
-        return crackedToken
-    }
-
-    /**
-     * Converts string to represent binary data in ASCII string format by translating it into a radix-64 representation and returns it
-     * @ignore
-     */
-    _convertUrlSafeToRegularBase64EncodedString(str: string) {
-        return str.replace("-", "+").replace("_", "/")
-    }
-
-    /**
-     * Serializes the parameters for the authorization endpoint URL and returns the serialized uri string.
-     * @ignore
-     */
-    _serialize(responseType: string, obj: any, resource?: string) {
-        var str: string[] = []
-
-        if (obj !== null) {
-            str.push("?response_type=" + responseType)
-            str.push("client_id=" + encodeURIComponent(obj.clientId))
-            if (resource) {
-                str.push("resource=" + encodeURIComponent(resource))
-            }
-
-            str.push("redirect_uri=" + encodeURIComponent(obj.redirectUri))
-            str.push("state=" + encodeURIComponent(obj.state))
-
-            if (obj.hasOwnProperty("slice")) {
-                str.push("slice=" + encodeURIComponent(obj.slice))
-            }
-
-            if (obj.hasOwnProperty("extraQueryParameter")) {
-                str.push(obj.extraQueryParameter)
-            }
-
-            var correlationId = obj.correlationId ? obj.correlationId : guid()
-            str.push("client-request-id=" + encodeURIComponent(correlationId))
-        }
-
-        return str.join("&")
-    }
-
-    /**
-     * Calculates the expires in value in milliseconds for the acquired token
-     * @ignore
-     */
-    _expiresIn(expires: any) {
-        // if AAD did not send "expires_in" property, use default expiration of 3599 seconds, for some reason AAD sends 3599 as "expires_in" value instead of 3600
-        if (!expires) expires = 3599
-        return now() + parseInt(expires, 10)
     }
 
     /**
@@ -1520,48 +1415,20 @@ export class Adal {
      * @ignore
      */
     _addAdalFrame(iframeId: string) {
-        if (!iframeId) {
-            return
+        var adalFrame = document.getElementById(iframeId)
+        if (adalFrame) {
+            return adalFrame
         }
 
         if (DEBUG) {
             Logger.info("Add adal frame to document:" + iframeId)
         }
-        var adalFrame = document.getElementById(iframeId)
-
-        if (!adalFrame) {
-            if (
-                document.createElement &&
-                document.documentElement &&
-                (window["opera"] ||
-                    window.navigator.userAgent.indexOf("MSIE 5.0") === -1)
-            ) {
-                var ifr = document.createElement("iframe") as any
-                ifr.setAttribute("id", iframeId)
-                ifr.setAttribute("aria-hidden", "true")
-                ifr.style.visibility = "hidden"
-                ifr.style.position = "absolute"
-                ifr.style.width = ifr.style.height = ifr.borderWidth = "0px"
-
-                adalFrame = document
-                    .getElementsByTagName("body")[0]
-                    .appendChild(ifr)
-            } else if (document.body && document.body.insertAdjacentHTML) {
-                document.body.insertAdjacentHTML(
-                    "beforeEnd" as any,
-                    '<iframe name="' +
-                        iframeId +
-                        '" id="' +
-                        iframeId +
-                        '" style="display:none"></iframe>',
-                )
-            }
-            if (window.frames && window.frames[iframeId]) {
-                adalFrame = window.frames[iframeId]
-            }
-        }
-
-        return adalFrame
+        // NOTE: removed special case for legacy opera/IE
+        document.body.insertAdjacentHTML(
+            "beforeEnd" as any,
+            `<iframe name="${iframeId}" id="${iframeId}" style="display:none"></iframe>`,
+        )
+        return window.frames && window.frames[iframeId]
     }
 }
 
@@ -1576,6 +1443,10 @@ function saveItem(key: string, value: any, preserve = false) {
     } else {
         Storage.setItem(key, value)
     }
+}
+
+function areSameHost(a: string, b: string): boolean {
+    return new URL(a).host === new URL(b).host
 }
 
 /**
@@ -1634,17 +1505,27 @@ function deserialize(query: string) {
 }
 
 /**
- * Extracts resource value from state.
- * @ignore
+ * Matches nonce from the request with the response.
  */
-function getResourceFromState(state) {
+function matchNonce(user: any): boolean {
+    const requestNonce = getItem(StorageKey.NONCE_IDTOKEN)
+    if (requestNonce) {
+        for (const nonce of requestNonce.split(CACHE_DELIMETER)) {
+            if (nonce === user.profile.nonce) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+function getResourceFromState(state): string {
     if (state) {
         var splitIndex = state.indexOf(RESOURCE_DELIMETER)
         if (splitIndex > -1 && splitIndex + 1 < state.length) {
             return state.substring(splitIndex + 1)
         }
     }
-
     return ""
 }
 
@@ -1653,7 +1534,7 @@ function isEmpty(str: string): boolean {
 }
 
 function has(obj: any, key: string): boolean {
-    return !!obj && Object.hasOwnProperty.call(obj, key)
+    return Object.hasOwnProperty.call(obj, key)
 }
 
 function now() {
@@ -1661,10 +1542,50 @@ function now() {
 }
 
 /**
+ * Calculates the expires in value in milliseconds for the acquired token
+ */
+function expiresIn(expires: any) {
+    // if AAD did not send "expires_in" property, use default expiration of 3599 seconds, for some reason AAD sends 3599 as "expires_in" value instead of 3600
+    if (!expires) expires = 3599
+    return now() + parseInt(expires, 10)
+}
+
+/**
+ * Serializes the parameters for the authorization endpoint URL and returns the serialized uri string.
+ */
+function serialize(responseType: string, obj: any, resource?: string): string {
+    if (!obj) return ""
+
+    const str: string[] = [
+        "?response_type=" + responseType,
+        "client_id=" + encodeURIComponent(obj.clientId),
+    ]
+    if (resource) {
+        str.push("resource=" + encodeURIComponent(resource))
+    }
+
+    str.push("redirect_uri=" + encodeURIComponent(obj.redirectUri))
+    str.push("state=" + encodeURIComponent(obj.state))
+
+    if (has(obj, "slice")) {
+        str.push("slice=" + encodeURIComponent(obj.slice))
+    }
+
+    if (has(obj, "extraQueryParameter")) {
+        str.push(obj.extraQueryParameter)
+    }
+
+    const correlationId = obj.correlationId || guid()
+    str.push("client-request-id=" + encodeURIComponent(correlationId))
+
+    return str.join("&")
+}
+
+/**
  * Generates RFC4122 version 4 guid (128 bits)
  * @ignore
  */
-function guid(): string {
+function guid() {
     // RFC4122: The version 4 UUID is meant for generating UUIDs from truly-random or
     // pseudo-random numbers.
     // The algorithm is as follows:
@@ -1685,23 +1606,22 @@ function guid(): string {
     // Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
     // y could be 1000, 1001, 1010, 1011 since most significant two bits needs to be 10
     // y values are 8, 9, A, B
-    // @ts-expect-error
-    var cryptoObj = window.crypto || window.msCrypto // for IE 11
-    var buffer = new Uint8Array(16)
-    cryptoObj.getRandomValues(buffer)
+    let buffer = new Uint8Array(16)
+    crypto.getRandomValues(buffer)
     //buffer[6] and buffer[7] represents the time_hi_and_version field. We will set the four most significant bits (4 through 7) of buffer[6] to represent decimal number 4 (UUID version number).
     buffer[6] |= 0x40 //buffer[6] | 01000000 will set the 6 bit to 1.
     buffer[6] &= 0x4f //buffer[6] & 01001111 will set the 4, 5, and 7 bit to 0 such that bits 4-7 == 0100 = "4".
     //buffer[8] represents the clock_seq_hi_and_reserved field. We will set the two most significant bits (6 and 7) of the clock_seq_hi_and_reserved to zero and one, respectively.
     buffer[8] |= 0x80 //buffer[8] | 10000000 will set the 7 bit to 1.
     buffer[8] &= 0xbf //buffer[8] & 10111111 will set the 6 bit to 0.
-    buffer = buffer.map((n: any) => {
+    buffer = buffer.map((n) => {
         let hex = n.toString(16)
         while (hex.length < 2) {
             hex = "0" + hex
         }
-        return hex
+        return hex as any
     })
+
     return (
         buffer[0] +
         buffer[1] +
