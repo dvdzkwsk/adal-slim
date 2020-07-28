@@ -53,7 +53,42 @@ type RequestInfo = {
 }
 
 export type Config = any
-export type User = any
+export type User =
+    | {
+          profile: UserProfile
+      }
+    | undefined
+
+interface UserProfile {
+    aud: string
+    iss: string
+    iat: number
+    nbf: number
+    exp: number
+    acct: number
+    aio: string
+    amr: string[]
+    family_name: string
+    given_name: string
+    in_corp: string
+    ipaddr: string
+    name: string
+    nonce: string
+    oid: string
+    onprem_sid: string
+    puid: string
+    rh: string
+    sub: string
+    tid: string
+    unique_name: string
+    upn: string
+    uti: string
+    ver: string
+    xms_mpci: number
+    xms_pci: number
+    mri: string
+}
+
 export interface AuthenticationContext {
     config: Config
     login(): void
@@ -126,9 +161,7 @@ export function AuthenticationContext(config: Config): AuthenticationContext {
         saveItem(StorageKey.ERROR, "")
         saveItem(StorageKey.ERROR_DESCRIPTION, "")
         const url =
-            getNavigateUrl("id_token") +
-            "&nonce=" +
-            encode(_idTokenNonce)
+            getNavigateUrl("id_token") + "&nonce=" + encode(_idTokenNonce)
 
         if (config.displayCall) {
             config.displayCall(url)
@@ -797,9 +830,7 @@ export function AuthenticationContext(config: Config): AuthenticationContext {
             ) {
                 var parts = _user.profile.upn.split("@")
                 // local part can include @ in quotes. Sending last part handles that.
-                url +=
-                    "&domain_hint=" +
-                    encode(parts[parts.length - 1])
+                url += "&domain_hint=" + encode(parts[parts.length - 1])
             }
         }
         return url
@@ -1222,7 +1253,7 @@ export function AuthenticationContext(config: Config): AuthenticationContext {
         return window.frames && window.frames[iframeId]
     }
 
-    const ctx: AuthenticationContext = window[SINGLETON] = {
+    const ctx: AuthenticationContext = (window[SINGLETON] = {
         config,
         login,
         logout,
@@ -1236,7 +1267,7 @@ export function AuthenticationContext(config: Config): AuthenticationContext {
         handleWindowCallback,
         _callBackMappedToRenewStates,
         _callBacksMappedToRenewStates,
-    }
+    })
     return ctx
 }
 
