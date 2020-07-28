@@ -44,37 +44,6 @@ const ACCESS_TOKEN = "access_token",
     CACHE_DELIMETER = "||",
     SINGLETON = "_adalInstance"
 
-let readConfig = (config: Config): Config => {
-    config = {
-        popUp: false,
-        instance: "https://login.microsoftonline.com/",
-        loginResource: config.clientId,
-        laodFrameTimeout: 6000,
-        expireOffsetSeconds: 300,
-        navigateToLoginRequestUrl: true,
-        tenant: "common",
-        redirectUri: window.location.href.split("?")[0].split("#")[0],
-        callback: () => {},
-        ...config,
-    }
-    if (DEBUG) {
-        Logger.correlationId = config.correlationId
-    }
-    return config
-}
-
-type Config = any
-type User = any
-
-/**
- * Request info object created from the response received from AAD.
- *  @class RequestInfo
- *  @property {object} parameters - object comprising of fields such as id_token/error, session_state, state, e.t.c.
- *  @property {REQUEST_TYPE} requestType - either LOGIN, RENEW_TOKEN or UNKNOWN.
- *  @property {boolean} stateMatch - true if state is valid, false otherwise.
- *  @property {string} stateResponse - unique guid used to match the response with the request.
- *  @property {boolean} valid - true if requestType contains id_token, access_token or error, false otherwise.
- */
 type RequestInfo = {
     parameters: {[key: string]: any}
     requestType: RequestType
@@ -83,7 +52,9 @@ type RequestInfo = {
     valid: boolean
 }
 
-interface Adal {
+export type Config = any
+export type User = any
+export interface AuthenticationContext {
     config: Config
     login(): void
     logout(): void
@@ -104,7 +75,7 @@ interface Adal {
     _callBacksMappedToRenewStates: any
 }
 
-export function AuthenticationContext(config: Config): Adal {
+export function AuthenticationContext(config: Config): AuthenticationContext {
     if (window[SINGLETON]) {
         return window[SINGLETON]
     }
@@ -157,7 +128,7 @@ export function AuthenticationContext(config: Config): Adal {
         const url =
             getNavigateUrl("id_token") +
             "&nonce=" +
-            encodeURIComponent(_idTokenNonce)
+            encode(_idTokenNonce)
 
         if (config.displayCall) {
             config.displayCall(url)
@@ -417,7 +388,7 @@ export function AuthenticationContext(config: Config): Adal {
         if (responseType === ResponseType.ID_TOKEN) {
             _idTokenNonce = guid()
             saveItem(StorageKey.NONCE_IDTOKEN, _idTokenNonce, true)
-            urlNavigate += "&nonce=" + encodeURIComponent(_idTokenNonce)
+            urlNavigate += "&nonce=" + encode(_idTokenNonce)
         }
 
         urlNavigate += "&prompt=none"
@@ -454,7 +425,7 @@ export function AuthenticationContext(config: Config): Adal {
             "prompt",
         )
         urlNavigate = addHintParameters(urlNavigate + "&prompt=none")
-        urlNavigate += "&nonce=" + encodeURIComponent(_idTokenNonce)
+        urlNavigate += "&nonce=" + encode(_idTokenNonce)
         registerCallback(expectedState, config.clientId, callback)
         if (DEBUG) {
             Logger.verbosePii("Navigate to:" + urlNavigate)
@@ -639,7 +610,7 @@ export function AuthenticationContext(config: Config): Adal {
         }
         if (claims) {
             if (urlNavigate.indexOf("&claims") === -1) {
-                urlNavigate += "&claims=" + encodeURIComponent(claims)
+                urlNavigate += "&claims=" + encode(claims)
             } else {
                 throw new Error(
                     "Claims cannot be passed as an extraQueryParameter",
@@ -687,7 +658,7 @@ export function AuthenticationContext(config: Config): Adal {
         }
 
         if (claims && urlNavigate.indexOf("&claims") === -1) {
-            urlNavigate += "&claims=" + encodeURIComponent(claims)
+            urlNavigate += "&claims=" + encode(claims)
         } else if (claims && urlNavigate.indexOf("&claims") !== -1) {
             throw new Error("Claims cannot be passed as an extraQueryParameter")
         }
@@ -780,7 +751,7 @@ export function AuthenticationContext(config: Config): Adal {
             if (config.postLogoutRedirectUri) {
                 logout =
                     "post_logout_redirect_uri=" +
-                    encodeURIComponent(config.postLogoutRedirectUri)
+                    encode(config.postLogoutRedirectUri)
             }
 
             urlNavigate =
@@ -811,13 +782,13 @@ export function AuthenticationContext(config: Config): Adal {
             // don't add sid twice if user provided it in the extraQueryParameter value
             if (!urlContainsQueryStringParameter("sid", url)) {
                 // add sid
-                url += "&sid=" + encodeURIComponent(_user.profile.sid)
+                url += "&sid=" + encode(_user.profile.sid)
             }
         } else if (_user.profile.upn) {
             // don't add login_hint twice if user provided it in the extraQueryParameter value
             if (!urlContainsQueryStringParameter("login_hint", url)) {
                 // add login_hint
-                url += "&login_hint=" + encodeURIComponent(_user.profile.upn)
+                url += "&login_hint=" + encode(_user.profile.upn)
             }
             // don't add domain_hint twice if user provided it in the extraQueryParameter value
             if (
@@ -828,7 +799,7 @@ export function AuthenticationContext(config: Config): Adal {
                 // local part can include @ in quotes. Sending last part handles that.
                 url +=
                     "&domain_hint=" +
-                    encodeURIComponent(parts[parts.length - 1])
+                    encode(parts[parts.length - 1])
             }
         }
         return url
@@ -970,7 +941,7 @@ export function AuthenticationContext(config: Config): Adal {
         let resource = getResourceFromState(requestInfo.stateResponse)
 
         // Record error
-        if (requestInfo.parameters.hasOwnProperty(ERROR_DESCRIPTION)) {
+        if (has(requestInfo.parameters, ERROR_DESCRIPTION)) {
             if (DEBUG) {
                 Logger.infoPii(
                     "Error :" +
@@ -999,7 +970,7 @@ export function AuthenticationContext(config: Config): Adal {
                 if (DEBUG) {
                     Logger.info("State is right")
                 }
-                if (requestInfo.parameters.hasOwnProperty(SESSION_STATE)) {
+                if (has(requestInfo.parameters, SESSION_STATE)) {
                     saveItem(
                         StorageKey.SESSION_STATE,
                         requestInfo.parameters[SESSION_STATE],
@@ -1008,7 +979,7 @@ export function AuthenticationContext(config: Config): Adal {
 
                 let keys
 
-                if (requestInfo.parameters.hasOwnProperty(ACCESS_TOKEN)) {
+                if (has(requestInfo.parameters, ACCESS_TOKEN)) {
                     if (DEBUG) {
                         Logger.info("Fragment has access token")
                     }
@@ -1032,7 +1003,7 @@ export function AuthenticationContext(config: Config): Adal {
                     )
                 }
 
-                if (requestInfo.parameters.hasOwnProperty(ID_TOKEN)) {
+                if (has(requestInfo.parameters, ID_TOKEN)) {
                     // info("Fragment has id token")
                     _loginInProgress = false
                     _user = createUser(requestInfo.parameters[ID_TOKEN])
@@ -1110,14 +1081,14 @@ export function AuthenticationContext(config: Config): Adal {
     function handleWindowCallback(hash: string = window.location.hash) {
         if (!isCallback(hash)) return
 
-        let self!: Adal
+        let self!: AuthenticationContext
         let isPopup
 
         const lastWindow = _openedWindows[_openedWindows.length - 1]
         if (
             lastWindow &&
             lastWindow.opener &&
-            lastWindow.opener._adalInstance
+            lastWindow.opener._AuthenticationContextInstance
         ) {
             self = lastWindow.opener._adalInstance
             isPopup = true
@@ -1162,11 +1133,11 @@ export function AuthenticationContext(config: Config): Adal {
             tokenType = ID_TOKEN
         }
 
-        let errorDesc = requestInfo.parameters[ERROR_DESCRIPTION]
-        let error = requestInfo.parameters[ERROR]
         try {
             if (tokenReceivedCallback) {
-                tokenReceivedCallback(errorDesc, token, error, tokenType)
+                let error = requestInfo.parameters[ERROR]
+                let description = requestInfo.parameters[ERROR_DESCRIPTION]
+                tokenReceivedCallback(description, token, error, tokenType)
             }
         } catch (err) {
             if (DEBUG) {
@@ -1251,7 +1222,7 @@ export function AuthenticationContext(config: Config): Adal {
         return window.frames && window.frames[iframeId]
     }
 
-    const adal: Adal = window[SINGLETON] = {
+    const ctx: AuthenticationContext = window[SINGLETON] = {
         config,
         login,
         logout,
@@ -1266,7 +1237,7 @@ export function AuthenticationContext(config: Config): Adal {
         _callBackMappedToRenewStates,
         _callBacksMappedToRenewStates,
     }
-    return adal
+    return ctx
 }
 
 export let clearCacheForResource = (resource: string) => {
@@ -1346,6 +1317,31 @@ let decodeJWT = (
     }
 }
 
+let readConfig = (config: Config): Config => {
+    config = {
+        popUp: false,
+        instance: "https://login.microsoftonline.com/",
+        loginResource: config.clientId,
+        laodFrameTimeout: 6000,
+        expireOffsetSeconds: 300,
+        navigateToLoginRequestUrl: true,
+        tenant: "common",
+        redirectUri: window.location.href.split("?")[0].split("#")[0],
+        callback: () => {},
+        ...config,
+    }
+    if (DEBUG) {
+        Logger.correlationId = config.correlationId
+    }
+    return config
+}
+
+/**
+ * Alias for encodeURIComponent for smaller bundle sizes since encodeURIComponent
+ * cannot be mangled as it refers to a global.
+ */
+let encode = (str: string) => encodeURIComponent(str)
+
 /**
  * Checks if the authorization endpoint URL contains query string parameters
  */
@@ -1363,8 +1359,7 @@ let removeQueryStringParameter = (url: string, name: string) =>
         .replace(new RegExp("(" + name + "=)[^&]+"), "")
 
 /**
- * Saves the key-value pair in the cache
- * @ignore
+ * Saves a key-value pair in cache
  */
 let saveItem = (key: string, value: any, preserve = false) => {
     if (preserve) {
@@ -1376,15 +1371,16 @@ let saveItem = (key: string, value: any, preserve = false) => {
 }
 
 /**
- * Checks for the resource in the cache. By default, cache location is Session Storage
+ * Checks for the resource in cache. By default, cache location is Session Storage
  */
 let hasResource = (key: string): boolean => {
-    const keys = getItem(StorageKey.TOKEN_KEYS)
+    let keys = getItem(StorageKey.TOKEN_KEYS)
     return !isEmpty(keys) && keys.indexOf(key + RESOURCE_DELIMETER) > -1
 }
 
 /**
  * Returns the anchor part (#) of the URL
+ * TODO: can just use URL API?
  */
 let getHash = (hash: string) => {
     if (hash.indexOf("#/") > -1) {
@@ -1398,10 +1394,8 @@ let getHash = (hash: string) => {
 
 /**
  * Checks if the URL fragment contains access token, id token or error_description.
- * @param {string} hash  -  Hash passed from redirect page
- * @returns {Boolean} true if response contains id_token, access_token or error, false otherwise.
  */
-let isCallback = (hash: string) => {
+let isCallback = (hash: string): boolean => {
     const parameters = deserialize(getHash(hash))
     return (
         has(parameters, ERROR_DESCRIPTION) ||
@@ -1470,17 +1464,17 @@ let serialize = (responseType: string, obj: any, resource?: string): string => {
 
     const str: string[] = [
         "?response_type=" + responseType,
-        "client_id=" + encodeURIComponent(obj.clientId),
+        "client_id=" + encode(obj.clientId),
     ]
     if (resource) {
-        str.push("resource=" + encodeURIComponent(resource))
+        str.push("resource=" + encode(resource))
     }
 
-    str.push("redirect_uri=" + encodeURIComponent(obj.redirectUri))
-    str.push("state=" + encodeURIComponent(obj.state))
+    str.push("redirect_uri=" + encode(obj.redirectUri))
+    str.push("state=" + encode(obj.state))
 
     if (has(obj, "slice")) {
-        str.push("slice=" + encodeURIComponent(obj.slice))
+        str.push("slice=" + encode(obj.slice))
     }
 
     if (has(obj, "extraQueryParameter")) {
@@ -1488,14 +1482,13 @@ let serialize = (responseType: string, obj: any, resource?: string): string => {
     }
 
     const correlationId = obj.correlationId || guid()
-    str.push("client-request-id=" + encodeURIComponent(correlationId))
+    str.push("client-request-id=" + encode(correlationId))
 
     return str.join("&")
 }
 
 /**
  * Generates RFC4122 version 4 guid (128 bits)
- * @ignore
  */
 let guid = () => {
     // RFC4122: The version 4 UUID is meant for generating UUIDs from truly-random or
