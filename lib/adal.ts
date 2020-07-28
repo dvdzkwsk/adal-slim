@@ -1,4 +1,3 @@
-// AdalJS v1.0.17
 //----------------------------------------------------------------------
 // @preserve Copyright (c) Microsoft Open Technologies, Inc.
 // All Rights Reserved
@@ -9,7 +8,7 @@
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
-//id
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -45,7 +44,7 @@ const ACCESS_TOKEN = "access_token",
     CACHE_DELIMETER = "||",
     SINGLETON = "_adalInstance"
 
-function readConfig(config: Config): Config {
+let readConfig = (config: Config): Config => {
     config = {
         popUp: false,
         instance: "https://login.microsoftonline.com/",
@@ -68,18 +67,43 @@ function readConfig(config: Config): Config {
 type Config = any
 type User = any
 
+/**
+ * Request info object created from the response received from AAD.
+ *  @class RequestInfo
+ *  @property {object} parameters - object comprising of fields such as id_token/error, session_state, state, e.t.c.
+ *  @property {REQUEST_TYPE} requestType - either LOGIN, RENEW_TOKEN or UNKNOWN.
+ *  @property {boolean} stateMatch - true if state is valid, false otherwise.
+ *  @property {string} stateResponse - unique guid used to match the response with the request.
+ *  @property {boolean} valid - true if requestType contains id_token, access_token or error, false otherwise.
+ */
+type RequestInfo = {
+    parameters: {[key: string]: any}
+    requestType: "LOGIN" | "RENEW_TOKEN" | "UNKNOWN"
+    stateMatch: boolean
+    stateResponse: string
+    valid: boolean
+}
+
 interface Adal {
     config: Config
     login(): void
     logOut(): void
     loginInProgress(): boolean
-    getUser(): User
-    getCachedUser(): User
-    getCachedToken(): any
-    registerCallback(): void
-    acquireToken(): void
-    getRequestInfo(): void
-    saveTokenFromHash(): void
+    getUser(): User | undefined
+    getCachedUser(): User | undefined
+    getCachedToken(resource: string): string | undefined
+    registerCallback(expectedState: any, resource: string, callback: any): void
+    acquireToken(resource: string, callback: any): void
+    acquireTokenPopup(
+        resource: string,
+        extraQueryParameters: string,
+        claims: string | undefined,
+        callback: any,
+    ): void
+    getRequestInfo(hash: string): RequestInfo
+    saveTokenFromHash(requestInfo: RequestInfo): void
+    _callBackMappedToRenewStates: any
+    _callBacksMappedToRenewStates: any
 }
 
 export function AuthenticationContext(config: Config): Adal {
@@ -244,14 +268,14 @@ export function AuthenticationContext(config: Config): Adal {
         _openedWindows.push(popupWindow)
         const registeredRedirectUri = config.redirectUri.split("#")[0]
 
-        var pollTimer = setInterval(() => {
+        let pollTimer = setInterval(() => {
             if (
                 !popupWindow ||
                 popupWindow.closed ||
                 popupWindow.closed === undefined
             ) {
-                var error = "Popup Window closed"
-                var errorDesc =
+                let error = "Popup Window closed"
+                let errorDesc =
                     "Popup Window closed by UI action/ Popup Window handle destroyed due to cross zone navigation in IE/Edge"
 
                 handlePopupError(
@@ -264,8 +288,9 @@ export function AuthenticationContext(config: Config): Adal {
                 clearInterval(pollTimer)
                 return
             }
+
             try {
-                var popUpWindowLocation = popupWindow.location
+                let popUpWindowLocation = popupWindow.location
                 if (
                     encodeURI(popUpWindowLocation.href).indexOf(
                         encodeURI(registeredRedirectUri),
@@ -378,16 +403,15 @@ export function AuthenticationContext(config: Config): Adal {
         if (DEBUG) {
             Logger.info("renewToken is called for resource:" + resource)
         }
-        var frameHandle = addAdalFrame("adalRenewFrame" + resource)
-        var expectedState = guid() + RESOURCE_DELIMETER + resource
+        let frameHandle = addAdalFrame("adalRenewFrame" + resource)
+        let expectedState = guid() + RESOURCE_DELIMETER + resource
         config.state = expectedState
-        // renew happens in iframe, so it keeps javascript context
         _renewStates.push(expectedState)
         if (DEBUG) {
             Logger.verbose("Renew token Expected state: " + expectedState)
         }
         // remove the existing prompt=... query parameter and add prompt=none
-        var urlNavigate = urlRemoveQueryStringParameter(
+        let urlNavigate = removeQueryStringParameter(
             getNavigateUrl(responseType, resource),
             "prompt",
         )
@@ -398,7 +422,7 @@ export function AuthenticationContext(config: Config): Adal {
             urlNavigate += "&nonce=" + encodeURIComponent(_idTokenNonce)
         }
 
-        urlNavigate = urlNavigate + "&prompt=none"
+        urlNavigate += "&prompt=none"
         urlNavigate = addHintParameters(urlNavigate)
         registerCallback(expectedState, resource, callback)
         if (DEBUG) {
@@ -414,9 +438,6 @@ export function AuthenticationContext(config: Config): Adal {
      */
     function renewIdToken(callback, responseType?: string) {
         // use iframe to try to renew token
-        if (DEBUG) {
-            Logger.info("renewIdToken is called")
-        }
         let frameHandle = addAdalFrame("adalIdTokenFrame")
         let expectedState = guid() + RESOURCE_DELIMETER + config.clientId
         _idTokenNonce = guid()
@@ -430,7 +451,7 @@ export function AuthenticationContext(config: Config): Adal {
         // remove the existing prompt=... query parameter and add prompt=none
         let resource = responseType || config.clientId
         responseType = responseType || "id_token"
-        let urlNavigate = urlRemoveQueryStringParameter(
+        let urlNavigate = removeQueryStringParameter(
             getNavigateUrl(responseType, resource),
             "prompt",
         )
@@ -610,20 +631,23 @@ export function AuthenticationContext(config: Config): Adal {
             Logger.verbose("Renew token Expected state: " + expectedState)
         }
         // remove the existing prompt=... query parameter and add prompt=select_account
-        var urlNavigate = urlRemoveQueryStringParameter(
+        var urlNavigate = removeQueryStringParameter(
             getNavigateUrl("token", resource),
             "prompt",
         )
-        urlNavigate = urlNavigate + "&prompt=select_account"
+        urlNavigate += "&prompt=select_account"
 
         if (extraQueryParameters) {
             urlNavigate += extraQueryParameters
         }
-
-        if (claims && urlNavigate.indexOf("&claims") === -1) {
-            urlNavigate += "&claims=" + encodeURIComponent(claims)
-        } else if (claims && urlNavigate.indexOf("&claims") !== -1) {
-            throw new Error("Claims cannot be passed as an extraQueryParameter")
+        if (claims) {
+            if (urlNavigate.indexOf("&claims") === -1) {
+                urlNavigate += "&claims=" + encodeURIComponent(claims)
+            } else {
+                throw new Error(
+                    "Claims cannot be passed as an extraQueryParameter",
+                )
+            }
         }
 
         urlNavigate = addHintParameters(urlNavigate)
@@ -656,7 +680,7 @@ export function AuthenticationContext(config: Config): Adal {
         }
 
         // remove the existing prompt=... query parameter and add prompt=select_account
-        var urlNavigate = urlRemoveQueryStringParameter(
+        var urlNavigate = removeQueryStringParameter(
             getNavigateUrl("token", resource),
             "prompt",
         )
@@ -741,17 +765,6 @@ export function AuthenticationContext(config: Config): Adal {
         }
 
         saveItem(StorageKey.TOKEN_KEYS, "")
-    }
-
-    function clearCacheForResource(resource: string) {
-        saveItem(StorageKey.STATE_RENEW, "")
-        saveItem(StorageKey.ERROR, "")
-        saveItem(StorageKey.ERROR_DESCRIPTION, "")
-
-        if (hasResource(resource)) {
-            saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
-            saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
-        }
     }
 
     /**
@@ -855,21 +868,10 @@ export function AuthenticationContext(config: Config): Adal {
     }
 
     /**
-     * Request info object created from the response received from AAD.
-     *  @class RequestInfo
-     *  @property {object} parameters - object comprising of fields such as id_token/error, session_state, state, e.t.c.
-     *  @property {REQUEST_TYPE} requestType - either LOGIN, RENEW_TOKEN or UNKNOWN.
-     *  @property {boolean} stateMatch - true if state is valid, false otherwise.
-     *  @property {string} stateResponse - unique guid used to match the response with the request.
-     *  @property {boolean} valid - true if requestType contains id_token, access_token or error, false otherwise.
-     */
-
-    /**
      * Creates a requestInfo object from the URL fragment and returns it.
-     * @returns {RequestInfo} an object created from the redirect response from AAD comprising of the keys - parameters, requestType, stateMatch, stateResponse and valid.
      */
-    function getRequestInfo(hash) {
-        const requestInfo = {
+    function getRequestInfo(hash): RequestInfo {
+        const requestInfo: RequestInfo = {
             valid: false,
             parameters: {},
             stateMatch: false,
@@ -905,15 +907,15 @@ export function AuthenticationContext(config: Config): Adal {
 
             // async calls can fire iframe and login request at the same time if developer does not use the API as expected
             // incoming callback needs to be looked up to find the request type
-            if (this._matchState(requestInfo)) {
-                // loginRedirect or acquireTokenRedirect
+            // loginRedirect or acquireTokenRedirect
+            if (matchState(requestInfo)) {
                 return requestInfo
             }
 
             // external api requests may have many renewtoken requests for different resource
             if (!requestInfo.stateMatch && window.parent) {
-                requestInfo.requestType = this._requestType
-                for (const state of this._renewStates) {
+                requestInfo.requestType = _requestType
+                for (const state of _renewStates) {
                     if (state === requestInfo.stateResponse) {
                         requestInfo.stateMatch = true
                         break
@@ -957,7 +959,7 @@ export function AuthenticationContext(config: Config): Adal {
     /**
      * Saves token or error received in the response from AAD in the cache. In case of id_token, it also creates the user object.
      */
-    function saveTokenFromHash(requestInfo) {
+    function saveTokenFromHash(requestInfo: RequestInfo) {
         if (DEBUG) {
             Logger.info(
                 "State status:" +
@@ -969,7 +971,7 @@ export function AuthenticationContext(config: Config): Adal {
         saveItem(StorageKey.ERROR, "")
         saveItem(StorageKey.ERROR_DESCRIPTION, "")
 
-        var resource = getResourceFromState(requestInfo.stateResponse)
+        let resource = getResourceFromState(requestInfo.stateResponse)
 
         // Record error
         if (requestInfo.parameters.hasOwnProperty(ERROR_DESCRIPTION)) {
@@ -988,7 +990,7 @@ export function AuthenticationContext(config: Config): Adal {
             )
 
             if (requestInfo.requestType === RequestType.LOGIN) {
-                this.loginInProgress = false
+                _loginInProgress = false
                 saveItem(
                     StorageKey.LOGIN_ERROR,
                     requestInfo.parameters.error_description,
@@ -1008,7 +1010,7 @@ export function AuthenticationContext(config: Config): Adal {
                     )
                 }
 
-                var keys
+                let keys
 
                 if (requestInfo.parameters.hasOwnProperty(ACCESS_TOKEN)) {
                     if (DEBUG) {
@@ -1035,21 +1037,19 @@ export function AuthenticationContext(config: Config): Adal {
                 }
 
                 if (requestInfo.parameters.hasOwnProperty(ID_TOKEN)) {
-                    // this.info("Fragment has id token")
-                    this.loginInProgress = false
-                    this._user = this._createUser(
-                        requestInfo.parameters[ID_TOKEN],
-                    )
-                    if (this._user && this._user.profile) {
-                        if (!matchNonce(this._user)) {
+                    // info("Fragment has id token")
+                    _loginInProgress = false
+                    _user = createUser(requestInfo.parameters[ID_TOKEN])
+                    if (_user && _user.profile) {
+                        if (!matchNonce(_user)) {
                             saveItem(
                                 StorageKey.LOGIN_ERROR,
                                 "Nonce received: " +
-                                    this._user.profile.nonce +
+                                    _user.profile.nonce +
                                     " is not same as requested: " +
                                     getItem(StorageKey.NONCE_IDTOKEN),
                             )
-                            this._user = null
+                            _user = null
                         } else {
                             saveItem(
                                 StorageKey.IDTOKEN,
@@ -1057,9 +1057,9 @@ export function AuthenticationContext(config: Config): Adal {
                             )
 
                             // Save idtoken as access token for app itself
-                            resource = this.config.loginResource
-                                ? this.config.loginResource
-                                : this.config.clientId
+                            resource = config.loginResource
+                                ? config.loginResource
+                                : config.clientId
 
                             if (!hasResource(resource)) {
                                 keys = getItem(StorageKey.TOKEN_KEYS) || ""
@@ -1075,74 +1075,36 @@ export function AuthenticationContext(config: Config): Adal {
                             )
                             saveItem(
                                 StorageKey.EXPIRATION_KEY + resource,
-                                this._user.profile.exp,
+                                _user.profile.exp,
                             )
                         }
                     } else {
-                        requestInfo.parameters["error"] = "invalid id_token"
-                        requestInfo.parameters["error_description"] =
+                        const error = "invalid id_token"
+                        const description =
                             "Invalid id_token. id_token: " +
                             requestInfo.parameters[ID_TOKEN]
-                        saveItem(StorageKey.ERROR, "invalid id_token")
-                        saveItem(
-                            StorageKey.ERROR_DESCRIPTION,
-                            "Invalid id_token. id_token: " +
-                                requestInfo.parameters[ID_TOKEN],
-                        )
+
+                        requestInfo.parameters.error = error
+                        requestInfo.parameters.error_description = description
+                        requestInfo.parameters[ID_TOKEN]
+                        saveItem(StorageKey.ERROR, error)
+                        saveItem(StorageKey.ERROR_DESCRIPTION, description)
                     }
                 }
             } else {
-                requestInfo.parameters["error"] = "Invalid_state"
-                requestInfo.parameters["error_description"] =
+                const error = "Invalid_state"
+                const description =
                     "Invalid_state. state: " + requestInfo.stateResponse
-                saveItem(StorageKey.ERROR, "Invalid_state")
-                saveItem(
-                    StorageKey.ERROR_DESCRIPTION,
-                    "Invalid_state. state: " + requestInfo.stateResponse,
-                )
+
+                requestInfo.parameters.error = error
+                requestInfo.parameters.error_description = description
+
+                saveItem(StorageKey.ERROR, error)
+                saveItem(StorageKey.ERROR_DESCRIPTION, description)
             }
         }
 
         saveItem(StorageKey.RENEW_STATUS + resource, TokenRenewStatus.Completed)
-    }
-
-    /**
-     * Gets resource for given endpoint if mapping is provided with config.
-     */
-    function getResourceForEndpoint(endpoint: string): string | undefined {
-        // if user specified list of anonymous endpoints, no need to send token to these endpoints, return null.
-        if (this.config.anonymousEndpoints) {
-            for (let i = 0; i < this.config.anonymousEndpoints.length; i++) {
-                if (endpoint.indexOf(this.config.anonymousEndpoints[i]) > -1) {
-                    return
-                }
-            }
-        }
-
-        if (this.config.endpoints) {
-            for (const configEndpoint in this.config.endpoints) {
-                // configEndpoint is like /api/Todo requested endpoint can be /api/Todo/1
-                if (endpoint.indexOf(configEndpoint) > -1) {
-                    return this.config.endpoints[configEndpoint]
-                }
-            }
-        }
-
-        // default resource will be clientid if nothing specified
-        // App will use idtoken for calls to itself
-        // check if it's staring from http or https, needs to match with app host
-        if (
-            endpoint.indexOf("http://") > -1 ||
-            endpoint.indexOf("https://") > -1
-        ) {
-            if (areSameHost(endpoint, this.config.redirectUri)) {
-                return this.config.loginResource
-            }
-        } else {
-            // in angular level, the url for $http interceptor call could be relative url,
-            // if it's relative call, we'll treat it as app backend call.
-            return this.config.loginResource
-        }
     }
 
     /**
@@ -1155,7 +1117,7 @@ export function AuthenticationContext(config: Config): Adal {
         let self!: Adal
         let isPopup
 
-        const lastWindow = this._openedWindows[this._openedWindows.length - 1]
+        const lastWindow = _openedWindows[_openedWindows.length - 1]
         if (
             lastWindow &&
             lastWindow.opener &&
@@ -1167,7 +1129,7 @@ export function AuthenticationContext(config: Config): Adal {
             self = (window.parent as any)._adalInstance
         }
 
-        let requestInfo = self.getRequestInfo(hash) as any
+        let requestInfo = self.getRequestInfo(hash)
         let tokenReceivedCallback: any
 
         if (isPopup || window.parent !== window) {
@@ -1176,7 +1138,6 @@ export function AuthenticationContext(config: Config): Adal {
         } else {
             tokenReceivedCallback = self.config.callback
         }
-
 
         self.saveTokenFromHash(requestInfo)
 
@@ -1205,8 +1166,8 @@ export function AuthenticationContext(config: Config): Adal {
             tokenType = ID_TOKEN
         }
 
-        var errorDesc = requestInfo.parameters[ERROR_DESCRIPTION]
-        var error = requestInfo.parameters[ERROR]
+        let errorDesc = requestInfo.parameters[ERROR_DESCRIPTION]
+        let error = requestInfo.parameters[ERROR]
         try {
             if (tokenReceivedCallback) {
                 tokenReceivedCallback(errorDesc, token, error, tokenType)
@@ -1229,29 +1190,25 @@ export function AuthenticationContext(config: Config): Adal {
     }
 
     /**
-     * Constructs the authorization endpoint URL and returns it.
+     * Constructs the authorization endpoint URL
      */
-    function getNavigateUrl(responseType: string, resource?: string) {
-        return (
-            config.instance +
-            config.tenant +
-            "/oauth2/authorize" +
-            serialize(responseType, config, resource)
-        )
-    }
+    let getNavigateUrl = (responseType: string, resource?: string) =>
+        config.instance +
+        config.tenant +
+        "/oauth2/authorize" +
+        serialize(responseType, config, resource)
 
     /**
      * Returns the decoded id_token.
-     * @ignore
      */
     function extractIdToken(encodedIdToken: string) {
-        var decodedToken = decodeJwt(encodedIdToken)
+        let decodedToken = decodeJwt(encodedIdToken)
         if (!decodedToken) {
             return
         }
         try {
-            var base64IdToken = decodedToken.JWSPayload
-            var base64Decoded = base64DecodeStringUrlSafe(base64IdToken)
+            let base64IdToken = decodedToken.JWSPayload
+            let base64Decoded = base64DecodeStringUrlSafe(base64IdToken)
 
             if (!base64Decoded) {
                 if (DEBUG) {
@@ -1271,7 +1228,6 @@ export function AuthenticationContext(config: Config): Adal {
 
     /**
      * Decodes a string of data which has been encoded using base-64 encoding.
-     * @ignore
      */
     function base64DecodeStringUrlSafe(base64IdToken: string) {
         base64IdToken = base64IdToken.replace(/-/g, "+").replace(/_/g, "/")
@@ -1280,14 +1236,12 @@ export function AuthenticationContext(config: Config): Adal {
 
     /**
      * Decodes an id token into an object with header, payload and signature fields.
-     * @ignore
      */
-    // Adal.node js crack function
     function decodeJwt(jwt: string) {
         if (isEmpty(jwt)) return
 
-        const idTokenPartsRegex = /^([^\.\s]*)\.([^\.\s]+)\.([^\.\s]*)$/
-        const matches = idTokenPartsRegex.exec(jwt)
+        let idTokenPartsRegex = /^([^\.\s]*)\.([^\.\s]+)\.([^\.\s]*)$/
+        let matches = idTokenPartsRegex.exec(jwt)
 
         if (!matches || matches.length < 4) {
             if (DEBUG) {
@@ -1308,7 +1262,7 @@ export function AuthenticationContext(config: Config): Adal {
      * @ignore
      */
     function addAdalFrame(iframeId: string) {
-        var adalFrame = document.getElementById(iframeId)
+        let adalFrame = document.getElementById(iframeId)
         if (adalFrame) {
             return adalFrame
         }
@@ -1333,57 +1287,99 @@ export function AuthenticationContext(config: Config): Adal {
         getCachedToken,
         registerCallback,
         acquireToken,
+        acquireTokenPopup,
         getRequestInfo,
         saveTokenFromHash,
         loginInProgress: () => _loginInProgress,
+        _callBackMappedToRenewStates,
+        _callBacksMappedToRenewStates,
     }
-    return window[SINGLETON] = adal
+    return (window[SINGLETON] = adal)
 }
+
+export let clearCacheForResource = (resource: string) => {
+    saveItem(StorageKey.STATE_RENEW, "")
+    saveItem(StorageKey.ERROR, "")
+    saveItem(StorageKey.ERROR_DESCRIPTION, "")
+
+    if (hasResource(resource)) {
+        saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
+        saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
+    }
+}
+
+/**
+ * Gets resource for given endpoint if mapping is provided with config.
+ */
+// export function getResourceForEndpoint(endpoint: string): string | undefined {
+//     // if user specified list of anonymous endpoints, no need to send token to these endpoints, return null.
+//     if (config.anonymousEndpoints) {
+//         for (let i = 0; i < config.anonymousEndpoints.length; i++) {
+//             if (endpoint.indexOf(config.anonymousEndpoints[i]) > -1) {
+//                 return
+//             }
+//         }
+//     }
+
+//     if (config.endpoints) {
+//         for (const configEndpoint in config.endpoints) {
+//             // configEndpoint is like /api/Todo requested endpoint can be /api/Todo/1
+//             if (endpoint.indexOf(configEndpoint) > -1) {
+//                 return config.endpoints[configEndpoint]
+//             }
+//         }
+//     }
+
+//     // default resource will be clientid if nothing specified
+//     // App will use idtoken for calls to itself
+//     // check if it's staring from http or https, needs to match with app host
+//     if (
+//         endpoint.indexOf("http://") > -1 ||
+//         endpoint.indexOf("https://") > -1
+//     ) {
+//         if (haveSameHost(endpoint, config.redirectUri)) {
+//             return config.loginResource
+//         }
+//     } else {
+//         // in angular level, the url for $http interceptor call could be relative url,
+//         // if it's relative call, we'll treat it as app backend call.
+//         return config.loginResource
+//     }
+// }
 
 /**
  * Checks if the authorization endpoint URL contains query string parameters
  */
-function urlContainsQueryStringParameter(name: string, url: string) {
-    // regex to detect pattern of a ? or & followed by the name parameter and an equals character
-    return new RegExp("[\\?&]" + name + "=").test(url)
-}
+let urlContainsQueryStringParameter = (name: string, url: string) =>
+    new RegExp("[\\?&]" + name + "=").test(url)
 
 /**
  * Removes the query string parameter from the authorization endpoint URL if it exists
+ * we remove &name=value, name=value& and name=value
  */
-function urlRemoveQueryStringParameter(url: string, name: string) {
-    // we remove &name=value, name=value& and name=value
-    // &name=value
-    return url
+let removeQueryStringParameter = (url: string, name: string) =>
+    url
         .replace(new RegExp("(\\&" + name + "=)[^&]+"), "")
         .replace(new RegExp("(" + name + "=)[^&]+&"), "")
         .replace(new RegExp("(" + name + "=)[^&]+"), "")
-}
 
 /**
  * Saves the key-value pair in the cache
  * @ignore
  */
-function saveItem(key: string, value: any, preserve = false) {
+let saveItem = (key: string, value: any, preserve = false) => {
     if (preserve) {
-        const old = getItem(key) || ""
+        let old = getItem(key) || ""
         Storage.setItem(key, old + value + CACHE_DELIMETER)
     } else {
         Storage.setItem(key, value)
     }
 }
 
-const areSameHost = (a: string, b: string) => new URL(a).host === new URL(b).host
-const getItem = (key: string) => Storage.getItem(key)
-const isEmpty = (str: string) => !str || !str.length
-const has = (obj: any, key: string) => Object.hasOwnProperty.call(obj, key)
-const now = () => Math.round(Date.now() / 1000)
-
-
 /**
  * Checks for the resource in the cache. By default, cache location is Session Storage
  */
-function hasResource(key: string): boolean {
+let hasResource = (key: string): boolean => {
     const keys = getItem(StorageKey.TOKEN_KEYS)
     return !isEmpty(keys) && keys.indexOf(key + RESOURCE_DELIMETER) > -1
 }
@@ -1391,7 +1387,7 @@ function hasResource(key: string): boolean {
 /**
  * Returns the anchor part (#) of the URL
  */
-function getHash(hash: string) {
+let getHash = (hash: string) => {
     if (hash.indexOf("#/") > -1) {
         return hash.substring(hash.indexOf("#/") + 2)
     } else if (hash.indexOf("#") > -1) {
@@ -1406,7 +1402,7 @@ function getHash(hash: string) {
  * @param {string} hash  -  Hash passed from redirect page
  * @returns {Boolean} true if response contains id_token, access_token or error, false otherwise.
  */
-function isCallback(hash: string) {
+let isCallback = (hash: string) => {
     const parameters = deserialize(getHash(hash))
     return (
         has(parameters, ERROR_DESCRIPTION) ||
@@ -1419,7 +1415,7 @@ function isCallback(hash: string) {
  * Parses the query string parameters into a key-value pair object.
  * @ignore
  */
-function deserialize(query: string) {
+let deserialize = (query: string) => {
     let pl = /\+/g, // Regex for replacing addition symbol with a space
         search = /([^&=]+)=([^&]*)/g,
         decode = (s: string) => decodeURIComponent(s.replace(pl, " ")),
@@ -1436,7 +1432,7 @@ function deserialize(query: string) {
 /**
  * Matches nonce from the request with the response.
  */
-function matchNonce(user: any): boolean {
+let matchNonce = (user: any): boolean => {
     const requestNonce = getItem(StorageKey.NONCE_IDTOKEN)
     if (requestNonce) {
         for (const nonce of requestNonce.split(CACHE_DELIMETER)) {
@@ -1448,7 +1444,7 @@ function matchNonce(user: any): boolean {
     return false
 }
 
-function getResourceFromState(state): string {
+let getResourceFromState = (state): string => {
     if (state) {
         let splitIndex = state.indexOf(RESOURCE_DELIMETER)
         if (splitIndex > -1 && splitIndex + 1 < state.length) {
@@ -1458,11 +1454,10 @@ function getResourceFromState(state): string {
     return ""
 }
 
-
 /**
  * Calculates the expires in value in milliseconds for the acquired token
  */
-function expiresIn(expires: any) {
+let expiresIn = (expires: any) => {
     // if AAD did not send "expires_in" property, use default expiration of 3599 seconds, for some reason AAD sends 3599 as "expires_in" value instead of 3600
     if (!expires) expires = 3599
     return now() + parseInt(expires, 10)
@@ -1471,7 +1466,7 @@ function expiresIn(expires: any) {
 /**
  * Serializes the parameters for the authorization endpoint URL and returns the serialized uri string.
  */
-function serialize(responseType: string, obj: any, resource?: string): string {
+let serialize = (responseType: string, obj: any, resource?: string): string => {
     if (!obj) return ""
 
     const str: string[] = [
@@ -1503,7 +1498,7 @@ function serialize(responseType: string, obj: any, resource?: string): string {
  * Generates RFC4122 version 4 guid (128 bits)
  * @ignore
  */
-function guid() {
+let guid = () => {
     // RFC4122: The version 4 UUID is meant for generating UUIDs from truly-random or
     // pseudo-random numbers.
     // The algorithm is as follows:
@@ -1563,3 +1558,13 @@ function guid() {
         buffer[15]
     )
 }
+
+// let haveSameHost = (a: string, b: string) => new URL(a).host === new URL(b).host
+
+let getItem = (key: string) => Storage.getItem(key)
+
+let isEmpty = (str: string) => !str || !str.length
+
+let has = (obj: any, key: string) => Object.hasOwnProperty.call(obj, key)
+
+let now = () => Math.round(Date.now() / 1000)
