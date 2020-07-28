@@ -51,7 +51,6 @@ let readConfig = (config: Config): Config => {
         loginResource: config.clientId,
         laodFrameTimeout: 6000,
         expireOffsetSeconds: 300,
-        anonymousEndpoints: [],
         navigateToLoginRequestUrl: true,
         tenant: "common",
         redirectUri: window.location.href.split("?")[0].split("#")[0],
