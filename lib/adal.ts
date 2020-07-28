@@ -78,7 +78,7 @@ type User = any
  */
 type RequestInfo = {
     parameters: {[key: string]: any}
-    requestType: "LOGIN" | "RENEW_TOKEN" | "UNKNOWN"
+    requestType: RequestType
     stateMatch: boolean
     stateResponse: string
     valid: boolean
@@ -87,11 +87,9 @@ type RequestInfo = {
 interface Adal {
     config: Config
     login(): void
-    logOut(): void
+    logout(): void
     loginInProgress(): boolean
     getUser(): User | undefined
-    getCachedUser(): User | undefined
-    getCachedToken(resource: string): string | undefined
     registerCallback(expectedState: any, resource: string, callback: any): void
     acquireToken(resource: string, callback: any): void
     acquireTokenPopup(
@@ -102,6 +100,7 @@ interface Adal {
     ): void
     getRequestInfo(hash: string): RequestInfo
     saveTokenFromHash(requestInfo: RequestInfo): void
+    handleWindowCallback(hash?: string): void
     _callBackMappedToRenewStates: any
     _callBacksMappedToRenewStates: any
 }
@@ -532,7 +531,6 @@ export function AuthenticationContext(config: Config): Adal {
     /**
      * Acquires token from the cache if it is not expired. Otherwise sends request to AAD to obtain a new token.
      * @param {string}   resource  ResourceUri identifying the target resource
-     * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
      */
     function acquireToken(resource, callback) {
         if (!resource) {
@@ -771,7 +769,7 @@ export function AuthenticationContext(config: Config): Adal {
      * Redirects user to logout endpoint.
      * After logout, it will redirect to postLogoutRedirectUri if added as a property on the config object.
      */
-    function logOut() {
+    function logout() {
         clearCache()
         _user = null
         let urlNavigate: string
@@ -892,8 +890,7 @@ export function AuthenticationContext(config: Config): Adal {
         ) {
             requestInfo.valid = true
 
-            // which call
-            if (parameters.hasOwnProperty("state")) {
+            if (has(parameters, "state")) {
                 if (DEBUG) {
                     Logger.verbose("State: " + parameters.state)
                 }
@@ -1202,7 +1199,8 @@ export function AuthenticationContext(config: Config): Adal {
      * Returns the decoded id_token.
      */
     function extractIdToken(encodedIdToken: string) {
-        let decodedToken = decodeJwt(encodedIdToken)
+        // TODO: decodeJWT can be inlined.
+        let decodedToken = decodeJWT(encodedIdToken)
         if (!decodedToken) {
             return
         }
@@ -1235,31 +1233,7 @@ export function AuthenticationContext(config: Config): Adal {
     }
 
     /**
-     * Decodes an id token into an object with header, payload and signature fields.
-     */
-    function decodeJwt(jwt: string) {
-        if (isEmpty(jwt)) return
-
-        let idTokenPartsRegex = /^([^\.\s]*)\.([^\.\s]+)\.([^\.\s]*)$/
-        let matches = idTokenPartsRegex.exec(jwt)
-
-        if (!matches || matches.length < 4) {
-            if (DEBUG) {
-                Logger.warn("The returned id_token is not parseable.")
-            }
-            return
-        }
-
-        return {
-            header: matches[1],
-            JWSPayload: matches[2],
-            JWSSig: matches[3],
-        }
-    }
-
-    /**
      * Adds the hidden iframe for silent token renewal
-     * @ignore
      */
     function addAdalFrame(iframeId: string) {
         let adalFrame = document.getElementById(iframeId)
@@ -1278,23 +1252,22 @@ export function AuthenticationContext(config: Config): Adal {
         return window.frames && window.frames[iframeId]
     }
 
-    const adal: Adal = {
+    const adal: Adal = window[SINGLETON] = {
         config,
         login,
-        logOut,
+        logout,
         getUser,
-        getCachedUser: getUser,
-        getCachedToken,
         registerCallback,
         acquireToken,
         acquireTokenPopup,
         getRequestInfo,
         saveTokenFromHash,
         loginInProgress: () => _loginInProgress,
+        handleWindowCallback,
         _callBackMappedToRenewStates,
         _callBacksMappedToRenewStates,
     }
-    return (window[SINGLETON] = adal)
+    return adal
 }
 
 export let clearCacheForResource = (resource: string) => {
@@ -1346,6 +1319,33 @@ export let clearCacheForResource = (resource: string) => {
 //         return config.loginResource
 //     }
 // }
+
+let decodeJWT = (
+    jwt: string,
+):
+    | {
+          header: string
+          JWSPayload: string
+          JWSSig: string
+      }
+    | undefined => {
+    if (isEmpty(jwt)) return
+
+    let idTokenPartsRegex = /^([^\.\s]*)\.([^\.\s]+)\.([^\.\s]*)$/
+    let matches = idTokenPartsRegex.exec(jwt)
+    if (!matches || matches.length < 4) {
+        if (DEBUG) {
+            Logger.warn("The returned id_token is not parseable.")
+        }
+        return
+    }
+
+    return {
+        header: matches[1],
+        JWSPayload: matches[2],
+        JWSSig: matches[3],
+    }
+}
 
 /**
  * Checks if the authorization endpoint URL contains query string parameters

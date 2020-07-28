@@ -21,16 +21,16 @@ declare type RequestInfo = {
 interface Adal {
     config: Config;
     login(): void;
-    logOut(): void;
+    logout(): void;
     loginInProgress(): boolean;
     getUser(): User | undefined;
     getCachedUser(): User | undefined;
-    getCachedToken(resource: string): string | undefined;
     registerCallback(expectedState: any, resource: string, callback: any): void;
     acquireToken(resource: string, callback: any): void;
     acquireTokenPopup(resource: string, extraQueryParameters: string, claims: string | undefined, callback: any): void;
     getRequestInfo(hash: string): RequestInfo;
     saveTokenFromHash(requestInfo: RequestInfo): void;
+    handleWindowCallback(hash?: string): void;
     _callBackMappedToRenewStates: any;
     _callBacksMappedToRenewStates: any;
 }
