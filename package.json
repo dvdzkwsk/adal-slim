@@ -31,8 +31,8 @@
     ],
     "scripts": {
         "build": "yarn build-prod && yarn build-debug",
-        "build-prod": "microbundle build --format modern --define DEBUG=false",
-        "build-debug": "microbundle build --format modern --define DEBUG=true --output dist/debug",
+        "build-prod": "microbundle build --format modern,cjs --define DEBUG=false",
+        "build-debug": "microbundle build --format modern,cjs --define DEBUG=true --output dist/debug",
         "format": "prettier . --write"
     },
     "prettier": {
