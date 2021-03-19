@@ -15,8 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //----------------------------------------------------------------------
-import {Storage, StorageKey} from "./storage"
-import {Logger} from "./logger"
+declare const DEBUG: boolean
 
 enum RequestType {
     LOGIN = "LOGIN",
@@ -52,7 +51,7 @@ type RequestInfo = {
     valid: boolean
 }
 
-export type Config = any
+export type Config = any // TODO
 export type User =
     | {
           profile: UserProfile
@@ -110,7 +109,9 @@ export interface AuthenticationContext {
     _callBacksMappedToRenewStates: any
 }
 
-export function AuthenticationContext(config: Config): AuthenticationContext {
+export let AuthenticationContext: {
+    new (config: Config): AuthenticationContext
+} = ((config: Config): AuthenticationContext => {
     if (window[SINGLETON]) {
         return window[SINGLETON]
     }
@@ -1269,7 +1270,7 @@ export function AuthenticationContext(config: Config): AuthenticationContext {
         _callBacksMappedToRenewStates,
     })
     return ctx
-}
+}) as any
 
 export let clearCacheForResource = (resource: string) => {
     saveItem(StorageKey.STATE_RENEW, "")
@@ -1591,3 +1592,167 @@ let isEmpty = (str: string) => !str || !str.length
 let has = (obj: any, key: string) => Object.hasOwnProperty.call(obj, key)
 
 let now = () => Math.round(Date.now() / 1000)
+
+enum StorageKey {
+    TOKEN_KEYS = "adal.token.keys",
+    ACCESS_TOKEN_KEY = "adal.access.token.key",
+    EXPIRATION_KEY = "adal.expiration.key",
+    STATE_LOGIN = "adal.state.login",
+    STATE_RENEW = "adal.state.renew",
+    NONCE_IDTOKEN = "adal.nonce.idtoken",
+    SESSION_STATE = "adal.session.state",
+    USERNAME = "adal.username",
+    IDTOKEN = "adal.idtoken",
+    ERROR = "adal.error",
+    ERROR_DESCRIPTION = "adal.error.description",
+    LOGIN_REQUEST = "adal.login.request",
+    LOGIN_ERROR = "adal.login.error",
+    RENEW_STATUS = "adal.token.renew.status",
+}
+
+interface IStorage {
+    getItem(key: string): any
+    setItem(key: string, value: any, preserve?: boolean): void
+}
+
+const Storage: IStorage = (() => {
+    function supportsStorage(type: string) {
+        const storage = window[type]
+        if (!storage) {
+            return false
+        }
+        const testKey = "__test__"
+        storage.setItem(testKey, testKey)
+        if (storage.getItem(testKey) !== testKey) {
+            return false
+        }
+        storage.removeItem(testKey)
+        if (storage.getItem(testKey)) {
+            return false
+        }
+        return true
+    }
+
+    if (supportsStorage("localStorage")) return localStorage
+    if (supportsStorage("sessionStorage")) return sessionStorage
+    return {getItem() {}, setItem() {}} as IStorage
+})()
+
+export enum LogLevel {
+    Error = 0,
+    Warn,
+    Info,
+    Verbose,
+}
+
+const LOG_LEVEL_LABELS = {
+    [LogLevel.Error]: "ERROR",
+    [LogLevel.Warn]: "WARNING",
+    [LogLevel.Info]: "INFO",
+    [LogLevel.Verbose]: "VERBOSE",
+}
+
+const Logger = {
+    pii: false,
+    correlationId: undefined,
+    level: LogLevel.Error,
+
+    /**
+     * Checks the Logging Level, constructs the Log message and logs it. Users need to implement/override this method to turn on Logging.
+     * @param {number} level  -  Level can be set 0,1,2 and 3 which turns on 'error', 'warning', 'info' or 'verbose' level logging respectively.
+     * @param {string} message  -  Message to log.
+     * @param {string} error  -  Error to log.
+     */
+    log(
+        level: LogLevel,
+        message: string,
+        error: Error | string | undefined | null,
+        containsPii = false,
+    ) {
+        if (containsPii && !this.pii) return
+
+        if (level <= this.level) {
+            let timestamp = new Date().toUTCString()
+            let formattedMessage =
+                timestamp +
+                ":" +
+                (this.correlationId ? this.correlationId + "-" : "") +
+                LOG_LEVEL_LABELS[level] +
+                ": " +
+                message
+
+            if (error) {
+                // @ts-expect-error
+                formattedMessage += "\nstack:\n" + error.stack
+            }
+
+            console.log(formattedMessage)
+        }
+    },
+
+    /**
+     * Logs messages when Logging Level is set to 0.
+     * @param {string} message  -  Message to log.
+     * @param {string} error  -  Error to log.
+     */
+    error(message: string, error?: Error) {
+        this.log(LogLevel.Error, message, error)
+    },
+
+    /**
+     * Logs messages when Logging Level is set to 1.
+     * @param {string} message  -  Message to log.
+     */
+    warn(message: string) {
+        this.log(LogLevel.Warn, message, null)
+    },
+
+    /**
+     * Logs messages when Logging Level is set to 2.
+     * @param {string} message  -  Message to log.
+     */
+    info(message: string) {
+        this.log(LogLevel.Info, message, null)
+    },
+
+    /**
+     * Logs messages when Logging Level is set to 3.
+     * @param {string} message  -  Message to log.
+     */
+    verbose(message: string) {
+        this.log(LogLevel.Verbose, message, null)
+    },
+
+    /**
+     * Logs Pii messages when Logging Level is set to 0 and window.piiLoggingEnabled is set to true.
+     * @param {string} message  -  Message to log.
+     * @param {string} error  -  Error to log.
+     */
+    errorPii(message: string, error: string) {
+        this.log(LogLevel.Error, message, error, true)
+    },
+
+    /**
+     * Logs  Pii messages when Logging Level is set to 1 and window.piiLoggingEnabled is set to true.
+     * @param {string} message  -  Message to log.
+     */
+    warnPii(message: string) {
+        this.log(LogLevel.Warn, message, null, true)
+    },
+
+    /**
+     * Logs messages when Logging Level is set to 2 and window.piiLoggingEnabled is set to true.
+     * @param {string} message  -  Message to log.
+     */
+    infoPii(message: string) {
+        this.log(LogLevel.Info, message, null, true)
+    },
+
+    /**
+     * Logs messages when Logging Level is set to 3 and window.piiLoggingEnabled is set to true.
+     * @param {string} message  -  Message to log.
+     */
+    verbosePii(message: string) {
+        this.log(LogLevel.Verbose, message, null, true)
+    },
+}

@@ -60,6 +60,14 @@ export interface AuthenticationContext {
     _callBackMappedToRenewStates: any;
     _callBacksMappedToRenewStates: any;
 }
-export declare function AuthenticationContext(config: Config): AuthenticationContext;
+export declare let AuthenticationContext: {
+    new (config: Config): AuthenticationContext;
+};
 export declare let clearCacheForResource: (resource: string) => void;
+export declare enum LogLevel {
+    Error = 0,
+    Warn = 1,
+    Info = 2,
+    Verbose = 3
+}
 export {};
