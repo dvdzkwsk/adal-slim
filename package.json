@@ -42,8 +42,8 @@
         "trailingComma": "all"
     },
     "devDependencies": {
-        "microbundle": "^0.12.3",
-        "prettier": "^2.0.5",
-        "typescript": "^3.9.7"
+        "microbundle": "^0.13.0",
+        "prettier": "^2.2.1",
+        "typescript": "^4.2.3"
     }
 }

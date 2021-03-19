@@ -22,7 +22,7 @@
 var atobHelper = require("atob")
 var confighash = {hash: "#"}
 global.window = {}
-var AdalModule = require("../../../lib/adal.js")
+var AdalModule = require("../dist/adal.js")
 
 describe("Adal", function () {
     var adal, window
