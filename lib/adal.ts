@@ -1,4 +1,3 @@
-// AdalJS v1.0.17
 //----------------------------------------------------------------------
 // @preserve Copyright (c) Microsoft Open Technologies, Inc.
 // All Rights Reserved
@@ -9,37 +8,14 @@
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
-//id
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //----------------------------------------------------------------------
-const VERSION = "1.0.17",
-    ACCESS_TOKEN = "access_token",
-    EXPIRES_IN = "expires_in",
-    ID_TOKEN = "id_token",
-    ERROR = "error",
-    ERROR_DESCRIPTION = "error_description",
-    SESSION_STATE = "session_state",
-    RESOURCE_DELIMETER = "|",
-    CACHE_DELIMETER = "||",
-    POPUP_WIDTH = 483,
-    POPUP_HEIGHT = 600
-
-export enum LogLevel {
-    Error = 0,
-    Warn,
-    Info,
-    Verbose,
-}
-const LOG_LEVEL_LABELS = {
-    [LogLevel.Error]: "ERROR:",
-    [LogLevel.Warn]: "WARNING:",
-    [LogLevel.Info]: "INFO:",
-    [LogLevel.Verbose]: "VERBOSE:",
-}
+declare const DEBUG: boolean
 
 enum RequestType {
     LOGIN = "LOGIN",
@@ -50,6 +26,1572 @@ enum ResponseType {
     ID_TOKEN = "id_token token",
     TOKEN = "token",
 }
+
+enum TokenRenewStatus {
+    Canceled = "Canceled",
+    Completed = "Completed",
+    InProgress = "In Progress",
+}
+
+const ACCESS_TOKEN = "access_token",
+    EXPIRES_IN = "expires_in",
+    ID_TOKEN = "id_token",
+    ERROR = "error",
+    ERROR_DESCRIPTION = "error_description",
+    SESSION_STATE = "session_state",
+    RESOURCE_DELIMETER = "|",
+    CACHE_DELIMETER = "||",
+    SINGLETON = "_adalInstance"
+
+type RequestInfo = {
+    parameters: {[key: string]: any}
+    requestType: RequestType
+    stateMatch: boolean
+    stateResponse: string
+    valid: boolean
+}
+
+export type Config = any // TODO
+export type User =
+    | {
+          profile: UserProfile
+      }
+    | undefined
+
+interface UserProfile {
+    aud: string
+    iss: string
+    iat: number
+    nbf: number
+    exp: number
+    acct: number
+    aio: string
+    amr: string[]
+    family_name: string
+    given_name: string
+    in_corp: string
+    ipaddr: string
+    name: string
+    nonce: string
+    oid: string
+    onprem_sid: string
+    puid: string
+    rh: string
+    sub: string
+    tid: string
+    unique_name: string
+    upn: string
+    uti: string
+    ver: string
+    xms_mpci: number
+    xms_pci: number
+    mri: string
+}
+
+export interface AuthenticationContext {
+    config: Config
+    login(): void
+    logout(): void
+    loginInProgress(): boolean
+    getUser(): User | undefined
+    registerCallback(expectedState: any, resource: string, callback: any): void
+    acquireToken(resource: string, callback: any): void
+    acquireTokenPopup(
+        resource: string,
+        extraQueryParameters: string,
+        claims: string | undefined,
+        callback: any,
+    ): void
+    getRequestInfo(hash: string): RequestInfo
+    saveTokenFromHash(requestInfo: RequestInfo): void
+    handleWindowCallback(hash?: string): void
+    _callBackMappedToRenewStates: any
+    _callBacksMappedToRenewStates: any
+}
+
+export let AuthenticationContext: {
+    new (config: Config): AuthenticationContext
+} = ((config: Config): AuthenticationContext => {
+    if (window[SINGLETON]) {
+        return window[SINGLETON]
+    }
+
+    config = readConfig(config)
+    let _user: any
+    let _idTokenNonce: any
+    let _activeRenewals: any = {}
+    let _loginInProgress = false
+    let _acquireTokenInProgress = false
+    let _renewStates: any[] = []
+    let _openedWindows: any[] = []
+    let _callBackMappedToRenewStates: any = {}
+    let _callBacksMappedToRenewStates: any = {}
+    let _requestType = RequestType.LOGIN
+
+    /**
+     * Initiates the login process by redirecting the user to Azure AD authorization endpoint.
+     */
+    function login() {
+        if (_loginInProgress) {
+            if (DEBUG) {
+                Logger.info("Login in progress")
+            }
+            return
+        }
+
+        _loginInProgress = true
+
+        // Token is not present and user needs to login
+        const expectedState = guid()
+        const loginStartPage = window.location.href
+        config.state = expectedState
+        _idTokenNonce = guid()
+
+        if (DEBUG) {
+            Logger.verbose(
+                "Expected state: " +
+                    expectedState +
+                    " startPage:" +
+                    loginStartPage,
+            )
+        }
+        saveItem(StorageKey.LOGIN_REQUEST, loginStartPage)
+        saveItem(StorageKey.LOGIN_ERROR, "")
+        saveItem(StorageKey.STATE_LOGIN, expectedState, true)
+        saveItem(StorageKey.NONCE_IDTOKEN, _idTokenNonce, true)
+        saveItem(StorageKey.ERROR, "")
+        saveItem(StorageKey.ERROR_DESCRIPTION, "")
+        const url =
+            getNavigateUrl("id_token") + "&nonce=" + encode(_idTokenNonce)
+
+        if (config.displayCall) {
+            config.displayCall(url)
+        } else if (config.popUp) {
+            saveItem(StorageKey.STATE_LOGIN, "") // so requestInfo does not match redirect case
+            _renewStates.push(expectedState)
+            registerCallback(expectedState, config.clientId, config.callback)
+            loginPopup(url)
+        } else {
+            promptUser(url)
+        }
+    }
+
+    /**
+     * Configures popup window for login.
+     * @ignore
+     */
+    function openPopup(
+        urlNavigate: string,
+        title: string,
+        popUpWidth: number,
+        popUpHeight: number,
+    ) {
+        try {
+            const left = window.innerWidth / 2 - popUpWidth / 2 + window.screenX
+            const top =
+                window.innerHeight / 2 - popUpHeight / 2 + window.screenY
+            const popupWindow = window.open(
+                urlNavigate,
+                title,
+                "width=" +
+                    popUpWidth +
+                    ", height=" +
+                    popUpHeight +
+                    ", top=" +
+                    top +
+                    ", left=" +
+                    left,
+            )!
+            if (popupWindow.focus) {
+                popupWindow.focus()
+            }
+            return popupWindow
+        } catch (e) {
+            if (DEBUG) {
+                Logger.warn("Error opening popup, " + e.message)
+            }
+            _loginInProgress = false
+            _acquireTokenInProgress = false
+        }
+    }
+
+    function handlePopupError(
+        loginCallback: any,
+        resource: string | undefined | null,
+        error: string,
+        errorDesc: string,
+        loginError: string,
+    ) {
+        if (DEBUG) {
+            Logger.warn(errorDesc)
+        }
+        saveItem(StorageKey.ERROR, error)
+        saveItem(StorageKey.ERROR_DESCRIPTION, errorDesc)
+        saveItem(StorageKey.LOGIN_ERROR, loginError)
+
+        if (resource && _activeRenewals[resource]) {
+            _activeRenewals[resource] = null
+        }
+
+        _loginInProgress = false
+        _acquireTokenInProgress = false
+
+        if (loginCallback) {
+            loginCallback(errorDesc, null, error)
+        }
+    }
+
+    /**
+     * After authorization, the user will be sent to your specified redirect_uri with the user's bearer token
+     * attached to the URI fragment as an id_token field. It closes popup window after redirection.
+     * @ignore
+     */
+    function loginPopup(
+        urlNavigate: string,
+        resource?: string,
+        callback?: any,
+    ) {
+        var popupWindow = openPopup(urlNavigate, "login", 483, 600)
+        var loginCallback = callback || config.callback
+
+        if (!popupWindow) {
+            var error = "Error opening popup"
+            var errorDesc =
+                "Popup Window is null. This can happen if you are using IE"
+            handlePopupError(
+                loginCallback,
+                resource,
+                error,
+                errorDesc,
+                errorDesc,
+            )
+            return
+        }
+
+        _openedWindows.push(popupWindow)
+        const registeredRedirectUri = config.redirectUri.split("#")[0]
+
+        let pollTimer = setInterval(() => {
+            if (
+                !popupWindow ||
+                popupWindow.closed ||
+                popupWindow.closed === undefined
+            ) {
+                let error = "Popup Window closed"
+                let errorDesc =
+                    "Popup Window closed by UI action/ Popup Window handle destroyed due to cross zone navigation in IE/Edge"
+
+                handlePopupError(
+                    loginCallback,
+                    resource,
+                    error,
+                    errorDesc,
+                    errorDesc,
+                )
+                clearInterval(pollTimer)
+                return
+            }
+
+            try {
+                let popUpWindowLocation = popupWindow.location
+                if (
+                    encodeURI(popUpWindowLocation.href).indexOf(
+                        encodeURI(registeredRedirectUri),
+                    ) != -1
+                ) {
+                    handleWindowCallback(popUpWindowLocation.hash)
+                    clearInterval(pollTimer)
+                    _loginInProgress = false
+                    _acquireTokenInProgress = false
+                    if (DEBUG) {
+                        Logger.info("Closing popup window")
+                    }
+                    _openedWindows = []
+                    popupWindow.close()
+                    return
+                }
+            } catch (e) {}
+        }, 1)
+    }
+
+    function getUser() {
+        if (!_user) {
+            const idToken = getItem(StorageKey.IDTOKEN)
+            if (idToken) {
+                _user = createUser(idToken)
+            }
+        }
+        return _user
+    }
+
+    /**
+     * Gets token for the specified resource from the cache.
+     * @param {string}   resource A URI that identifies the resource for which the token is requested.
+     * @returns {string} token if if it exists and not expired, otherwise null.
+     */
+    function getCachedToken(resource: string): string | undefined {
+        if (!hasResource(resource)) return
+
+        const token = getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
+        const expiry = getItem(StorageKey.EXPIRATION_KEY + resource)
+
+        if (expiry && expiry > now() + config.expireOffsetSeconds) {
+            return token
+        } else {
+            saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
+            saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
+        }
+    }
+
+    /**
+     * Adds the passed callback to the array of callbacks for the specified resource and puts the array on the window object.
+     * @param {string}   resource A URI that identifies the resource for which the token is requested.
+     * @param {string}   expectedState A unique identifier (guid).
+     * @param {tokenCallback} callback - The callback provided by the caller. It will be called with token or error.
+     */
+    function registerCallback(
+        expectedState: any,
+        resource: string,
+        callback: any,
+    ) {
+        _activeRenewals[resource] = expectedState
+
+        if (!_callBacksMappedToRenewStates[expectedState]) {
+            _callBacksMappedToRenewStates[expectedState] = []
+        }
+
+        _callBacksMappedToRenewStates[expectedState].push(callback)
+
+        if (!_callBackMappedToRenewStates[expectedState]) {
+            _callBackMappedToRenewStates[expectedState] = (
+                errorDesc,
+                token,
+                error,
+                tokenType,
+            ) => {
+                _activeRenewals[resource] = null
+
+                for (
+                    var i = 0;
+                    i < _callBacksMappedToRenewStates[expectedState].length;
+                    ++i
+                ) {
+                    try {
+                        _callBacksMappedToRenewStates[expectedState][i](
+                            errorDesc,
+                            token,
+                            error,
+                            tokenType,
+                        )
+                    } catch (error) {
+                        if (DEBUG) {
+                            Logger.warn(error)
+                        }
+                    }
+                }
+
+                _callBacksMappedToRenewStates[expectedState] = null
+                _callBackMappedToRenewStates[expectedState] = null
+            }
+        }
+    }
+
+    /**
+     * Acquires access token with hidden iframe
+     * @ignore
+     */
+    function renewToken(resource, callback, responseType = "token") {
+        // use iframe to try to renew token
+        // use given resource to create new authz url
+        if (DEBUG) {
+            Logger.info("renewToken is called for resource:" + resource)
+        }
+        let frameHandle = addAdalFrame("adalRenewFrame" + resource)
+        let expectedState = guid() + RESOURCE_DELIMETER + resource
+        config.state = expectedState
+        _renewStates.push(expectedState)
+        if (DEBUG) {
+            Logger.verbose("Renew token Expected state: " + expectedState)
+        }
+        // remove the existing prompt=... query parameter and add prompt=none
+        let urlNavigate = removeQueryStringParameter(
+            getNavigateUrl(responseType, resource),
+            "prompt",
+        )
+
+        if (responseType === ResponseType.ID_TOKEN) {
+            _idTokenNonce = guid()
+            saveItem(StorageKey.NONCE_IDTOKEN, _idTokenNonce, true)
+            urlNavigate += "&nonce=" + encode(_idTokenNonce)
+        }
+
+        urlNavigate += "&prompt=none"
+        urlNavigate = addHintParameters(urlNavigate)
+        registerCallback(expectedState, resource, callback)
+        if (DEBUG) {
+            Logger.verbosePii("Navigate to:" + urlNavigate)
+        }
+        frameHandle.src = "about:blank"
+        loadFrameTimeout(urlNavigate, "adalRenewFrame" + resource, resource)
+    }
+
+    /**
+     * Renews idtoken for app's own backend when resource is clientId and calls the callback with token/error
+     * @ignore
+     */
+    function renewIdToken(callback, responseType?: string) {
+        // use iframe to try to renew token
+        let frameHandle = addAdalFrame("adalIdTokenFrame")
+        let expectedState = guid() + RESOURCE_DELIMETER + config.clientId
+        _idTokenNonce = guid()
+        saveItem(StorageKey.NONCE_IDTOKEN, _idTokenNonce, true)
+        config.state = expectedState
+        // renew happens in iframe, so it keeps javascript context
+        _renewStates.push(expectedState)
+        if (DEBUG) {
+            Logger.verbose("Renew Idtoken Expected state: " + expectedState)
+        }
+        // remove the existing prompt=... query parameter and add prompt=none
+        let resource = responseType || config.clientId
+        responseType = responseType || "id_token"
+        let urlNavigate = removeQueryStringParameter(
+            getNavigateUrl(responseType, resource),
+            "prompt",
+        )
+        urlNavigate = addHintParameters(urlNavigate + "&prompt=none")
+        urlNavigate += "&nonce=" + encode(_idTokenNonce)
+        registerCallback(expectedState, config.clientId, callback)
+        if (DEBUG) {
+            Logger.verbosePii("Navigate to:" + urlNavigate)
+        }
+        frameHandle.src = "about:blank"
+        loadFrameTimeout(urlNavigate, "adalIdTokenFrame", config.clientId)
+    }
+
+    function loadFrameTimeout(urlNavigation, frameName, resource) {
+        //set iframe session to pending
+        if (DEBUG) {
+            Logger.verbose("Set loading state to pending for: " + resource)
+        }
+        saveItem(
+            StorageKey.RENEW_STATUS + resource,
+            TokenRenewStatus.InProgress,
+        )
+        loadFrame(urlNavigation, frameName)
+
+        setTimeout(() => {
+            if (
+                getItem(StorageKey.RENEW_STATUS + resource) ===
+                TokenRenewStatus.InProgress
+            ) {
+                // fail the iframe session if it's in pending state
+                if (DEBUG) {
+                    Logger.verbose(
+                        "Loading frame has timed out after: " +
+                            config.loadFrameTimeout / 1000 +
+                            " seconds for resource " +
+                            resource,
+                    )
+                }
+                var expectedState = _activeRenewals[resource]
+
+                if (
+                    expectedState &&
+                    _callBackMappedToRenewStates[expectedState]
+                ) {
+                    _callBackMappedToRenewStates[expectedState](
+                        "Token renewal operation failed due to timeout",
+                        null,
+                        "Token Renewal Failed",
+                    )
+                }
+
+                saveItem(
+                    StorageKey.RENEW_STATUS + resource,
+                    TokenRenewStatus.Canceled,
+                )
+            }
+        }, config.loadFrameTimeout)
+    }
+
+    /**
+     * Loads iframe with authorization endpoint URL
+     */
+    function loadFrame(urlNavigate, frameName) {
+        // This trick overcomes iframe navigation in IE
+        // IE does not load the page consistently in iframe
+        if (DEBUG) {
+            Logger.info("LoadFrame: " + frameName)
+        }
+        setTimeout(() => {
+            const frameHandle = addAdalFrame(frameName) as any
+            if (!frameHandle.src || frameHandle.src === "about:blank") {
+                frameHandle.src = urlNavigate
+                loadFrame(urlNavigate, frameName)
+            }
+        }, 500)
+    }
+
+    /**
+     * Acquires token from the cache if it is not expired. Otherwise sends request to AAD to obtain a new token.
+     * @param {string}   resource  ResourceUri identifying the target resource
+     */
+    function acquireToken(resource, callback) {
+        if (!resource) {
+            const error = "resource is required"
+            if (DEBUG) {
+                Logger.warn(error)
+            }
+            callback(error, null, error)
+            return
+        }
+
+        const token = getCachedToken(resource)
+        if (token) {
+            if (DEBUG) {
+                Logger.info(
+                    "Token is already in cache for resource:" + resource,
+                )
+            }
+            callback(null, token, null)
+            return
+        }
+
+        if (
+            !_user &&
+            !(
+                config.extraQueryParameter &&
+                config.extraQueryParameter.indexOf("login_hint") !== -1
+            )
+        ) {
+            const error = "User login is required"
+            if (DEBUG) {
+                Logger.warn(error)
+            }
+            callback(error, null, error)
+            return
+        }
+
+        // renew attempt with iframe
+        // Already renewing for this resource, callback when we get the token.
+        if (_activeRenewals[resource]) {
+            // Active renewals contains the state for each renewal.
+            registerCallback(_activeRenewals[resource], resource, callback)
+        } else {
+            _requestType = RequestType.RENEW_TOKEN
+            if (resource === config.clientId) {
+                // App uses idtoken to send to api endpoints
+                // Default resource is tracked as clientid to store this token
+                if (_user) {
+                    if (DEBUG) {
+                        Logger.verbose("renewing idtoken")
+                    }
+                    renewIdToken(callback)
+                } else {
+                    if (DEBUG) {
+                        Logger.verbose("renewing idtoken and access_token")
+                    }
+                    renewIdToken(callback, ResponseType.ID_TOKEN)
+                }
+            } else {
+                if (_user) {
+                    if (DEBUG) {
+                        Logger.verbose("renewing access_token")
+                    }
+                    renewToken(resource, callback)
+                } else {
+                    if (DEBUG) {
+                        Logger.verbose("renewing idtoken and access_token")
+                    }
+                    renewToken(resource, callback, ResponseType.ID_TOKEN)
+                }
+            }
+        }
+    }
+
+    /**
+     * Acquires token (interactive flow using a popUp window) by sending request to AAD to obtain a new token.
+     * @param {string}   resource  ResourceUri identifying the target resource
+     * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
+     * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
+     */
+    function acquireTokenPopup(
+        resource,
+        extraQueryParameters,
+        claims,
+        callback,
+    ) {
+        if (!canAcquireToken(resource)) {
+            return
+        }
+
+        var expectedState = guid() + RESOURCE_DELIMETER + resource
+        config.state = expectedState
+        _renewStates.push(expectedState)
+        _requestType = RequestType.RENEW_TOKEN
+        if (DEBUG) {
+            Logger.verbose("Renew token Expected state: " + expectedState)
+        }
+        // remove the existing prompt=... query parameter and add prompt=select_account
+        var urlNavigate = removeQueryStringParameter(
+            getNavigateUrl("token", resource),
+            "prompt",
+        )
+        urlNavigate += "&prompt=select_account"
+
+        if (extraQueryParameters) {
+            urlNavigate += extraQueryParameters
+        }
+        if (claims) {
+            if (urlNavigate.indexOf("&claims") === -1) {
+                urlNavigate += "&claims=" + encode(claims)
+            } else {
+                throw new Error(
+                    "Claims cannot be passed as an extraQueryParameter",
+                )
+            }
+        }
+
+        urlNavigate = addHintParameters(urlNavigate)
+        _acquireTokenInProgress = true
+        if (DEBUG) {
+            Logger.info(
+                "acquireToken interactive is called for the resource " +
+                    resource,
+            )
+        }
+        registerCallback(expectedState, resource, callback)
+        loginPopup(urlNavigate, resource, callback)
+    }
+
+    /**
+     * Acquires token (interactive flow using a redirect) by sending request to AAD to obtain a new token. In this case the callback passed in the Authentication
+     * request constructor will be called.
+     * @param {string}   resource  ResourceUri identifying the target resource
+     * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
+     */
+    function acquireTokenRedirect(resource, extraQueryParameters, claims) {
+        if (!canAcquireToken(resource)) {
+            return
+        }
+
+        const expectedState = guid() + RESOURCE_DELIMETER + resource
+        config.state = expectedState
+        if (DEBUG) {
+            Logger.verbose("Renew token Expected state: " + expectedState)
+        }
+
+        // remove the existing prompt=... query parameter and add prompt=select_account
+        var urlNavigate = removeQueryStringParameter(
+            getNavigateUrl("token", resource),
+            "prompt",
+        )
+        urlNavigate = urlNavigate + "&prompt=select_account"
+        if (extraQueryParameters) {
+            urlNavigate += extraQueryParameters
+        }
+
+        if (claims && urlNavigate.indexOf("&claims") === -1) {
+            urlNavigate += "&claims=" + encode(claims)
+        } else if (claims && urlNavigate.indexOf("&claims") !== -1) {
+            throw new Error("Claims cannot be passed as an extraQueryParameter")
+        }
+
+        urlNavigate = addHintParameters(urlNavigate)
+        _acquireTokenInProgress = true
+        if (DEBUG) {
+            Logger.info(
+                "acquireToken interactive is called for the resource " +
+                    resource,
+            )
+        }
+        saveItem(StorageKey.LOGIN_REQUEST, window.location.href)
+        saveItem(StorageKey.STATE_RENEW, expectedState, true)
+        promptUser(urlNavigate)
+    }
+
+    function canAcquireToken(resource: string): boolean {
+        let error: string | undefined
+        if (!resource) {
+            error = "Resource is required"
+        } else if (!_user) {
+            error = "User login is required"
+        } else if (_acquireTokenInProgress) {
+            error = "Acquire token interactive is already in progress"
+        }
+        if (error) {
+            if (DEBUG) {
+                Logger.warn(error)
+            }
+            config.callback(error, null, error)
+        }
+        return !error
+    }
+
+    /**
+     * Redirects the browser to Azure AD authorization endpoint.
+     */
+    function promptUser(url: string) {
+        if (url) {
+            if (DEBUG) {
+                Logger.infoPii("Navigate to:" + url)
+            }
+            window.location.replace(url)
+        } else {
+            if (DEBUG) {
+                Logger.info("Navigate url is empty")
+            }
+        }
+    }
+
+    function clearCache() {
+        saveItem(StorageKey.LOGIN_REQUEST, "")
+        saveItem(StorageKey.SESSION_STATE, "")
+        saveItem(StorageKey.STATE_LOGIN, "")
+        saveItem(StorageKey.STATE_RENEW, "")
+        _renewStates = []
+        saveItem(StorageKey.NONCE_IDTOKEN, "")
+        saveItem(StorageKey.IDTOKEN, "")
+        saveItem(StorageKey.ERROR, "")
+        saveItem(StorageKey.ERROR_DESCRIPTION, "")
+        saveItem(StorageKey.LOGIN_ERROR, "")
+        saveItem(StorageKey.LOGIN_ERROR, "")
+        var keys = getItem(StorageKey.TOKEN_KEYS) as any
+
+        if (!isEmpty(keys)) {
+            keys = keys.split(RESOURCE_DELIMETER)
+            for (var i = 0; i < keys.length && keys[i] !== ""; i++) {
+                saveItem(StorageKey.ACCESS_TOKEN_KEY + keys[i], "")
+                saveItem(StorageKey.EXPIRATION_KEY + keys[i], 0)
+            }
+        }
+
+        saveItem(StorageKey.TOKEN_KEYS, "")
+    }
+
+    /**
+     * Redirects user to logout endpoint.
+     * After logout, it will redirect to postLogoutRedirectUri if added as a property on the config object.
+     */
+    function logout() {
+        clearCache()
+        _user = null
+        let urlNavigate: string
+
+        if (config.logOutUri) {
+            urlNavigate = config.logOutUri
+        } else {
+            let logout = ""
+            if (config.postLogoutRedirectUri) {
+                logout =
+                    "post_logout_redirect_uri=" +
+                    encode(config.postLogoutRedirectUri)
+            }
+
+            urlNavigate =
+                config.instance + config.tenant + "/oauth2/logout?" + logout
+        }
+
+        if (DEBUG) {
+            Logger.infoPii("Logout navigate to: " + urlNavigate)
+        }
+        promptUser(urlNavigate)
+    }
+
+    /**
+     * Adds login_hint to authorization URL which is used to pre-fill the username field of sign in page for the user if known ahead of time.
+     * domain_hint can be one of users/organisations which when added skips the email based discovery process of the user.
+     * @ignore
+     */
+    function addHintParameters(url: string) {
+        //If you dont use prompt=none, then if the session does not exist, there will be a failure.
+        //If sid is sent alongside domain or login hints, there will be a failure since request is ambiguous.
+        //If sid is sent with a prompt value other than none or attempt_none, there will be a failure since the request is ambiguous.
+
+        if (!_user || !_user.profile) {
+            return url
+        }
+
+        if (_user.profile.sid && url.indexOf("&prompt=none") !== -1) {
+            // don't add sid twice if user provided it in the extraQueryParameter value
+            if (!urlContainsQueryStringParameter("sid", url)) {
+                // add sid
+                url += "&sid=" + encode(_user.profile.sid)
+            }
+        } else if (_user.profile.upn) {
+            // don't add login_hint twice if user provided it in the extraQueryParameter value
+            if (!urlContainsQueryStringParameter("login_hint", url)) {
+                // add login_hint
+                url += "&login_hint=" + encode(_user.profile.upn)
+            }
+            // don't add domain_hint twice if user provided it in the extraQueryParameter value
+            if (
+                !urlContainsQueryStringParameter("domain_hint", url) &&
+                _user.profile.upn.indexOf("@") > -1
+            ) {
+                var parts = _user.profile.upn.split("@")
+                // local part can include @ in quotes. Sending last part handles that.
+                url += "&domain_hint=" + encode(parts[parts.length - 1])
+            }
+        }
+        return url
+    }
+
+    /**
+     * Creates a user object by decoding the id_token
+     * @ignore
+     */
+    function createUser(idToken) {
+        const json = extractIdToken(idToken)
+        if (!has(json, "aud")) {
+            return
+        }
+
+        if (json.aud.toLowerCase() !== config.clientId.toLowerCase()) {
+            if (DEBUG) {
+                Logger.warn("IdToken has invalid aud field")
+            }
+        } else {
+            return {
+                userName: json.upn || json.email,
+                profile: json,
+            }
+        }
+    }
+
+    /**
+     * Gets login error
+     * @returns {string} error message related to login.
+     */
+    function getLoginError() {
+        return getItem(StorageKey.LOGIN_ERROR)
+    }
+
+    /**
+     * Creates a requestInfo object from the URL fragment and returns it.
+     */
+    function getRequestInfo(hash): RequestInfo {
+        const requestInfo: RequestInfo = {
+            valid: false,
+            parameters: {},
+            stateMatch: false,
+            stateResponse: "",
+            requestType: RequestType.UNKNOWN,
+        }
+
+        const parameters = deserialize(getHash(hash)) as any
+        if (!parameters) {
+            return requestInfo
+        }
+
+        requestInfo.parameters = parameters
+        if (
+            has(parameters, ERROR_DESCRIPTION) ||
+            has(parameters, ACCESS_TOKEN) ||
+            has(parameters, ID_TOKEN)
+        ) {
+            requestInfo.valid = true
+
+            if (has(parameters, "state")) {
+                if (DEBUG) {
+                    Logger.verbose("State: " + parameters.state)
+                }
+                requestInfo.stateResponse = parameters.state
+            } else {
+                if (DEBUG) {
+                    Logger.warn("No state returned")
+                }
+                return requestInfo
+            }
+
+            // async calls can fire iframe and login request at the same time if developer does not use the API as expected
+            // incoming callback needs to be looked up to find the request type
+            // loginRedirect or acquireTokenRedirect
+            if (matchState(requestInfo)) {
+                return requestInfo
+            }
+
+            // external api requests may have many renewtoken requests for different resource
+            if (!requestInfo.stateMatch && window.parent) {
+                requestInfo.requestType = _requestType
+                for (const state of _renewStates) {
+                    if (state === requestInfo.stateResponse) {
+                        requestInfo.stateMatch = true
+                        break
+                    }
+                }
+            }
+        }
+        return requestInfo
+    }
+
+    /**
+     * Matches state from the request with the response.
+     * @ignore
+     */
+    function matchState(requestInfo) {
+        const loginStates = getItem(StorageKey.STATE_LOGIN)
+        if (loginStates) {
+            for (const state of loginStates.split(CACHE_DELIMETER)) {
+                if (state === requestInfo.stateResponse) {
+                    requestInfo.requestType = RequestType.LOGIN
+                    requestInfo.stateMatch = true
+                    return true
+                }
+            }
+        }
+
+        const acquireTokenStates = getItem(StorageKey.STATE_RENEW)
+        if (acquireTokenStates) {
+            for (const state of acquireTokenStates.split(CACHE_DELIMETER)) {
+                if (state === requestInfo.stateResponse) {
+                    requestInfo.requestType = RequestType.RENEW_TOKEN
+                    requestInfo.stateMatch = true
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    /**
+     * Saves token or error received in the response from AAD in the cache. In case of id_token, it also creates the user object.
+     */
+    function saveTokenFromHash(requestInfo: RequestInfo) {
+        if (DEBUG) {
+            Logger.info(
+                "State status:" +
+                    requestInfo.stateMatch +
+                    "; Request type:" +
+                    requestInfo.requestType,
+            )
+        }
+        saveItem(StorageKey.ERROR, "")
+        saveItem(StorageKey.ERROR_DESCRIPTION, "")
+
+        let resource = getResourceFromState(requestInfo.stateResponse)
+
+        // Record error
+        if (has(requestInfo.parameters, ERROR_DESCRIPTION)) {
+            if (DEBUG) {
+                Logger.infoPii(
+                    "Error :" +
+                        requestInfo.parameters.error +
+                        "; Error description:" +
+                        requestInfo.parameters[ERROR_DESCRIPTION],
+                )
+            }
+            saveItem(StorageKey.ERROR, requestInfo.parameters.error)
+            saveItem(
+                StorageKey.ERROR_DESCRIPTION,
+                requestInfo.parameters[ERROR_DESCRIPTION],
+            )
+
+            if (requestInfo.requestType === RequestType.LOGIN) {
+                _loginInProgress = false
+                saveItem(
+                    StorageKey.LOGIN_ERROR,
+                    requestInfo.parameters.error_description,
+                )
+            }
+        } else {
+            // It must verify the state from redirect
+            if (requestInfo.stateMatch) {
+                // record tokens to storage if exists
+                if (DEBUG) {
+                    Logger.info("State is right")
+                }
+                if (has(requestInfo.parameters, SESSION_STATE)) {
+                    saveItem(
+                        StorageKey.SESSION_STATE,
+                        requestInfo.parameters[SESSION_STATE],
+                    )
+                }
+
+                let keys
+
+                if (has(requestInfo.parameters, ACCESS_TOKEN)) {
+                    if (DEBUG) {
+                        Logger.info("Fragment has access token")
+                    }
+
+                    if (!hasResource(resource)) {
+                        keys = getItem(StorageKey.TOKEN_KEYS) || ""
+                        saveItem(
+                            StorageKey.TOKEN_KEYS,
+                            keys + resource + RESOURCE_DELIMETER,
+                        )
+                    }
+
+                    // save token with related resource
+                    saveItem(
+                        StorageKey.ACCESS_TOKEN_KEY + resource,
+                        requestInfo.parameters[ACCESS_TOKEN],
+                    )
+                    saveItem(
+                        StorageKey.EXPIRATION_KEY + resource,
+                        expiresIn(requestInfo.parameters[EXPIRES_IN]),
+                    )
+                }
+
+                if (has(requestInfo.parameters, ID_TOKEN)) {
+                    // info("Fragment has id token")
+                    _loginInProgress = false
+                    _user = createUser(requestInfo.parameters[ID_TOKEN])
+                    if (_user && _user.profile) {
+                        if (!matchNonce(_user)) {
+                            saveItem(
+                                StorageKey.LOGIN_ERROR,
+                                "Nonce received: " +
+                                    _user.profile.nonce +
+                                    " is not same as requested: " +
+                                    getItem(StorageKey.NONCE_IDTOKEN),
+                            )
+                            _user = null
+                        } else {
+                            saveItem(
+                                StorageKey.IDTOKEN,
+                                requestInfo.parameters[ID_TOKEN],
+                            )
+
+                            // Save idtoken as access token for app itself
+                            resource = config.loginResource
+                                ? config.loginResource
+                                : config.clientId
+
+                            if (!hasResource(resource)) {
+                                keys = getItem(StorageKey.TOKEN_KEYS) || ""
+                                saveItem(
+                                    StorageKey.TOKEN_KEYS,
+                                    keys + resource + RESOURCE_DELIMETER,
+                                )
+                            }
+
+                            saveItem(
+                                StorageKey.ACCESS_TOKEN_KEY + resource,
+                                requestInfo.parameters[ID_TOKEN],
+                            )
+                            saveItem(
+                                StorageKey.EXPIRATION_KEY + resource,
+                                _user.profile.exp,
+                            )
+                        }
+                    } else {
+                        const error = "invalid id_token"
+                        const description =
+                            "Invalid id_token. id_token: " +
+                            requestInfo.parameters[ID_TOKEN]
+
+                        requestInfo.parameters.error = error
+                        requestInfo.parameters.error_description = description
+                        requestInfo.parameters[ID_TOKEN]
+                        saveItem(StorageKey.ERROR, error)
+                        saveItem(StorageKey.ERROR_DESCRIPTION, description)
+                    }
+                }
+            } else {
+                const error = "Invalid_state"
+                const description =
+                    "Invalid_state. state: " + requestInfo.stateResponse
+
+                requestInfo.parameters.error = error
+                requestInfo.parameters.error_description = description
+
+                saveItem(StorageKey.ERROR, error)
+                saveItem(StorageKey.ERROR_DESCRIPTION, description)
+            }
+        }
+
+        saveItem(StorageKey.RENEW_STATUS + resource, TokenRenewStatus.Completed)
+    }
+
+    /**
+     * This method must be called for processing the response received from AAD. It extracts the hash, processes the token or error, saves it in the cache and calls the registered callbacks with the result.
+     * @param {string} [hash=window.location.hash] - Hash fragment of Url.
+     */
+    function handleWindowCallback(hash: string = window.location.hash) {
+        if (!isCallback(hash)) return
+
+        let self!: AuthenticationContext
+        let isPopup
+
+        const lastWindow = _openedWindows[_openedWindows.length - 1]
+        if (
+            lastWindow &&
+            lastWindow.opener &&
+            lastWindow.opener._AuthenticationContextInstance
+        ) {
+            self = lastWindow.opener._adalInstance
+            isPopup = true
+        } else if (window.parent && (window.parent as any)._adalInstance) {
+            self = (window.parent as any)._adalInstance
+        }
+
+        let requestInfo = self.getRequestInfo(hash)
+        let tokenReceivedCallback: any
+
+        if (isPopup || window.parent !== window) {
+            tokenReceivedCallback =
+                self._callBackMappedToRenewStates[requestInfo.stateResponse]
+        } else {
+            tokenReceivedCallback = self.config.callback
+        }
+
+        self.saveTokenFromHash(requestInfo)
+
+        let token: any
+        let tokenType: any
+        if (
+            requestInfo.requestType === RequestType.RENEW_TOKEN &&
+            window.parent
+        ) {
+            if (DEBUG) {
+                if (window.parent !== window) {
+                    Logger.verbose(
+                        "Window is in iframe, acquiring token silently",
+                    )
+                } else {
+                    Logger.verbose("acquiring token interactive in progress")
+                }
+            }
+
+            token =
+                requestInfo.parameters[ACCESS_TOKEN] ||
+                requestInfo.parameters[ID_TOKEN]
+            tokenType = ACCESS_TOKEN
+        } else if (requestInfo.requestType === RequestType.LOGIN) {
+            token = requestInfo.parameters[ID_TOKEN]
+            tokenType = ID_TOKEN
+        }
+
+        try {
+            if (tokenReceivedCallback) {
+                let error = requestInfo.parameters[ERROR]
+                let description = requestInfo.parameters[ERROR_DESCRIPTION]
+                tokenReceivedCallback(description, token, error, tokenType)
+            }
+        } catch (err) {
+            if (DEBUG) {
+                Logger.error(
+                    "Error occurred in user defined callback function: " + err,
+                )
+            }
+        }
+
+        if (window.parent === window && !isPopup) {
+            if (self.config.navigateToLoginRequestUrl) {
+                window.location.href = getItem(StorageKey.LOGIN_REQUEST)
+            } else {
+                window.location.hash = ""
+            }
+        }
+    }
+
+    /**
+     * Constructs the authorization endpoint URL
+     */
+    let getNavigateUrl = (responseType: string, resource?: string) =>
+        config.instance +
+        config.tenant +
+        "/oauth2/authorize" +
+        serialize(responseType, config, resource)
+
+    /**
+     * Returns the decoded id_token.
+     */
+    function extractIdToken(encodedIdToken: string) {
+        // TODO: decodeJWT can be inlined.
+        let decodedToken = decodeJWT(encodedIdToken)
+        if (!decodedToken) {
+            return
+        }
+        try {
+            let base64IdToken = decodedToken.JWSPayload
+            let base64Decoded = base64DecodeStringUrlSafe(base64IdToken)
+
+            if (!base64Decoded) {
+                if (DEBUG) {
+                    Logger.info(
+                        "The returned id_token could not be base64 url safe decoded.",
+                    )
+                }
+                return
+            }
+            return JSON.parse(base64Decoded)
+        } catch (err) {
+            if (DEBUG) {
+                Logger.error("The returned id_token could not be decoded", err)
+            }
+        }
+    }
+
+    /**
+     * Decodes a string of data which has been encoded using base-64 encoding.
+     */
+    function base64DecodeStringUrlSafe(base64IdToken: string) {
+        base64IdToken = base64IdToken.replace(/-/g, "+").replace(/_/g, "/")
+        return decodeURIComponent(escape(window.atob(base64IdToken)))
+    }
+
+    /**
+     * Adds the hidden iframe for silent token renewal
+     */
+    function addAdalFrame(iframeId: string) {
+        let adalFrame = document.getElementById(iframeId)
+        if (adalFrame) {
+            return adalFrame
+        }
+
+        if (DEBUG) {
+            Logger.info("Add adal frame to document:" + iframeId)
+        }
+        // NOTE: removed special case for legacy opera/IE
+        document.body.insertAdjacentHTML(
+            "beforeEnd" as any,
+            `<iframe name="${iframeId}" id="${iframeId}" style="display:none"></iframe>`,
+        )
+        return window.frames && window.frames[iframeId]
+    }
+
+    const ctx: AuthenticationContext = (window[SINGLETON] = {
+        config,
+        login,
+        logout,
+        getUser,
+        registerCallback,
+        acquireToken,
+        acquireTokenPopup,
+        getRequestInfo,
+        saveTokenFromHash,
+        loginInProgress: () => _loginInProgress,
+        handleWindowCallback,
+        _callBackMappedToRenewStates,
+        _callBacksMappedToRenewStates,
+    })
+    return ctx
+}) as any
+
+export let clearCacheForResource = (resource: string) => {
+    saveItem(StorageKey.STATE_RENEW, "")
+    saveItem(StorageKey.ERROR, "")
+    saveItem(StorageKey.ERROR_DESCRIPTION, "")
+
+    if (hasResource(resource)) {
+        saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
+        saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
+    }
+}
+
+/**
+ * Gets resource for given endpoint if mapping is provided with config.
+ */
+// export function getResourceForEndpoint(endpoint: string): string | undefined {
+//     // if user specified list of anonymous endpoints, no need to send token to these endpoints, return null.
+//     if (config.anonymousEndpoints) {
+//         for (let i = 0; i < config.anonymousEndpoints.length; i++) {
+//             if (endpoint.indexOf(config.anonymousEndpoints[i]) > -1) {
+//                 return
+//             }
+//         }
+//     }
+
+//     if (config.endpoints) {
+//         for (const configEndpoint in config.endpoints) {
+//             // configEndpoint is like /api/Todo requested endpoint can be /api/Todo/1
+//             if (endpoint.indexOf(configEndpoint) > -1) {
+//                 return config.endpoints[configEndpoint]
+//             }
+//         }
+//     }
+
+//     // default resource will be clientid if nothing specified
+//     // App will use idtoken for calls to itself
+//     // check if it's staring from http or https, needs to match with app host
+//     if (
+//         endpoint.indexOf("http://") > -1 ||
+//         endpoint.indexOf("https://") > -1
+//     ) {
+//         if (haveSameHost(endpoint, config.redirectUri)) {
+//             return config.loginResource
+//         }
+//     } else {
+//         // in angular level, the url for $http interceptor call could be relative url,
+//         // if it's relative call, we'll treat it as app backend call.
+//         return config.loginResource
+//     }
+// }
+
+let decodeJWT = (
+    jwt: string,
+):
+    | {
+          header: string
+          JWSPayload: string
+          JWSSig: string
+      }
+    | undefined => {
+    if (isEmpty(jwt)) return
+
+    let idTokenPartsRegex = /^([^\.\s]*)\.([^\.\s]+)\.([^\.\s]*)$/
+    let matches = idTokenPartsRegex.exec(jwt)
+    if (!matches || matches.length < 4) {
+        if (DEBUG) {
+            Logger.warn("The returned id_token is not parseable.")
+        }
+        return
+    }
+
+    return {
+        header: matches[1],
+        JWSPayload: matches[2],
+        JWSSig: matches[3],
+    }
+}
+
+let readConfig = (config: Config): Config => {
+    config = {
+        popUp: false,
+        instance: "https://login.microsoftonline.com/",
+        loginResource: config.clientId,
+        laodFrameTimeout: 6000,
+        expireOffsetSeconds: 300,
+        navigateToLoginRequestUrl: true,
+        tenant: "common",
+        redirectUri: window.location.href.split("?")[0].split("#")[0],
+        callback: () => {},
+        ...config,
+    }
+    if (DEBUG) {
+        Logger.correlationId = config.correlationId
+    }
+    return config
+}
+
+/**
+ * Alias for encodeURIComponent for smaller bundle sizes since encodeURIComponent
+ * cannot be mangled as it refers to a global.
+ */
+let encode = (str: string) => encodeURIComponent(str)
+
+/**
+ * Checks if the authorization endpoint URL contains query string parameters
+ */
+let urlContainsQueryStringParameter = (name: string, url: string) =>
+    new RegExp("[\\?&]" + name + "=").test(url)
+
+/**
+ * Removes the query string parameter from the authorization endpoint URL if it exists
+ * we remove &name=value, name=value& and name=value
+ */
+let removeQueryStringParameter = (url: string, name: string) =>
+    url
+        .replace(new RegExp("(\\&" + name + "=)[^&]+"), "")
+        .replace(new RegExp("(" + name + "=)[^&]+&"), "")
+        .replace(new RegExp("(" + name + "=)[^&]+"), "")
+
+/**
+ * Saves a key-value pair in cache
+ */
+let saveItem = (key: string, value: any, preserve = false) => {
+    if (preserve) {
+        let old = getItem(key) || ""
+        Storage.setItem(key, old + value + CACHE_DELIMETER)
+    } else {
+        Storage.setItem(key, value)
+    }
+}
+
+/**
+ * Checks for the resource in cache. By default, cache location is Session Storage
+ */
+let hasResource = (key: string): boolean => {
+    let keys = getItem(StorageKey.TOKEN_KEYS)
+    return !isEmpty(keys) && keys.indexOf(key + RESOURCE_DELIMETER) > -1
+}
+
+/**
+ * Returns the anchor part (#) of the URL
+ * TODO: can just use URL API?
+ */
+let getHash = (hash: string) => {
+    if (hash.indexOf("#/") > -1) {
+        return hash.substring(hash.indexOf("#/") + 2)
+    } else if (hash.indexOf("#") > -1) {
+        return hash.substring(1)
+    } else {
+        return hash
+    }
+}
+
+/**
+ * Checks if the URL fragment contains access token, id token or error_description.
+ */
+let isCallback = (hash: string): boolean => {
+    const parameters = deserialize(getHash(hash))
+    return (
+        has(parameters, ERROR_DESCRIPTION) ||
+        has(parameters, ACCESS_TOKEN) ||
+        has(parameters, ID_TOKEN)
+    )
+}
+
+/**
+ * Parses the query string parameters into a key-value pair object.
+ * @ignore
+ */
+let deserialize = (query: string) => {
+    let pl = /\+/g, // Regex for replacing addition symbol with a space
+        search = /([^&=]+)=([^&]*)/g,
+        decode = (s: string) => decodeURIComponent(s.replace(pl, " ")),
+        obj = {}
+
+    let match = search.exec(query)
+    while (match) {
+        obj[decode(match[1])] = decode(match[2])
+        match = search.exec(query)
+    }
+    return obj
+}
+
+/**
+ * Matches nonce from the request with the response.
+ */
+let matchNonce = (user: any): boolean => {
+    const requestNonce = getItem(StorageKey.NONCE_IDTOKEN)
+    if (requestNonce) {
+        for (const nonce of requestNonce.split(CACHE_DELIMETER)) {
+            if (nonce === user.profile.nonce) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+let getResourceFromState = (state): string => {
+    if (state) {
+        let splitIndex = state.indexOf(RESOURCE_DELIMETER)
+        if (splitIndex > -1 && splitIndex + 1 < state.length) {
+            return state.substring(splitIndex + 1)
+        }
+    }
+    return ""
+}
+
+/**
+ * Calculates the expires in value in milliseconds for the acquired token
+ */
+let expiresIn = (expires: any) => {
+    // if AAD did not send "expires_in" property, use default expiration of 3599 seconds, for some reason AAD sends 3599 as "expires_in" value instead of 3600
+    if (!expires) expires = 3599
+    return now() + parseInt(expires, 10)
+}
+
+/**
+ * Serializes the parameters for the authorization endpoint URL and returns the serialized uri string.
+ */
+let serialize = (responseType: string, obj: any, resource?: string): string => {
+    if (!obj) return ""
+
+    const str: string[] = [
+        "?response_type=" + responseType,
+        "client_id=" + encode(obj.clientId),
+    ]
+    if (resource) {
+        str.push("resource=" + encode(resource))
+    }
+
+    str.push("redirect_uri=" + encode(obj.redirectUri))
+    str.push("state=" + encode(obj.state))
+
+    if (has(obj, "slice")) {
+        str.push("slice=" + encode(obj.slice))
+    }
+
+    if (has(obj, "extraQueryParameter")) {
+        str.push(obj.extraQueryParameter)
+    }
+
+    const correlationId = obj.correlationId || guid()
+    str.push("client-request-id=" + encode(correlationId))
+
+    return str.join("&")
+}
+
+/**
+ * Generates RFC4122 version 4 guid (128 bits)
+ */
+let guid = () => {
+    // RFC4122: The version 4 UUID is meant for generating UUIDs from truly-random or
+    // pseudo-random numbers.
+    // The algorithm is as follows:
+    //     Set the two most significant bits (bits 6 and 7) of the
+    //        clock_seq_hi_and_reserved to zero and one, respectively.
+    //     Set the four most significant bits (bits 12 through 15) of the
+    //        time_hi_and_version field to the 4-bit version number from
+    //        Section 4.1.3. Version4
+    //     Set all the other bits to randomly (or pseudo-randomly) chosen
+    //     values.
+    // UUID                   = time-low "-" time-mid "-"time-high-and-version "-"clock-seq-reserved and low(2hexOctet)"-" node
+    // time-low               = 4hexOctet
+    // time-mid               = 2hexOctet
+    // time-high-and-version  = 2hexOctet
+    // clock-seq-and-reserved = hexOctet:
+    // clock-seq-low          = hexOctet
+    // node                   = 6hexOctet
+    // Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    // y could be 1000, 1001, 1010, 1011 since most significant two bits needs to be 10
+    // y values are 8, 9, A, B
+    let buffer = new Uint8Array(16)
+    crypto.getRandomValues(buffer)
+    //buffer[6] and buffer[7] represents the time_hi_and_version field. We will set the four most significant bits (4 through 7) of buffer[6] to represent decimal number 4 (UUID version number).
+    buffer[6] |= 0x40 //buffer[6] | 01000000 will set the 6 bit to 1.
+    buffer[6] &= 0x4f //buffer[6] & 01001111 will set the 4, 5, and 7 bit to 0 such that bits 4-7 == 0100 = "4".
+    //buffer[8] represents the clock_seq_hi_and_reserved field. We will set the two most significant bits (6 and 7) of the clock_seq_hi_and_reserved to zero and one, respectively.
+    buffer[8] |= 0x80 //buffer[8] | 10000000 will set the 7 bit to 1.
+    buffer[8] &= 0xbf //buffer[8] & 10111111 will set the 6 bit to 0.
+    buffer = buffer.map((n) => {
+        let hex = n.toString(16)
+        while (hex.length < 2) {
+            hex = "0" + hex
+        }
+        return hex as any
+    })
+
+    return (
+        buffer[0] +
+        buffer[1] +
+        buffer[2] +
+        buffer[3] +
+        "-" +
+        buffer[4] +
+        buffer[5] +
+        "-" +
+        buffer[6] +
+        buffer[7] +
+        "-" +
+        buffer[8] +
+        buffer[9] +
+        "-" +
+        buffer[10] +
+        buffer[11] +
+        buffer[12] +
+        buffer[13] +
+        buffer[14] +
+        buffer[15]
+    )
+}
+
+// let haveSameHost = (a: string, b: string) => new URL(a).host === new URL(b).host
+
+let getItem = (key: string) => Storage.getItem(key)
+
+let isEmpty = (str: string) => !str || !str.length
+
+let has = (obj: any, key: string) => Object.hasOwnProperty.call(obj, key)
+
+let now = () => Math.round(Date.now() / 1000)
 
 enum StorageKey {
     TOKEN_KEYS = "adal.token.keys",
@@ -66,1980 +1608,54 @@ enum StorageKey {
     LOGIN_REQUEST = "adal.login.request",
     LOGIN_ERROR = "adal.login.error",
     RENEW_STATUS = "adal.token.renew.status",
-    ANGULAR_LOGIN_REQUEST = "adal.angular.login.request",
 }
 
-enum TokenRenewStatus {
-    Canceled = "Canceled",
-    Completed = "Completed",
-    InProgress = "In Progress",
+interface IStorage {
+    getItem(key: string): any
+    setItem(key: string, value: any, preserve?: boolean): void
 }
 
-type Config = any
-type Options = any
-export class Adal {
-    config: Config
-    logLevel = LogLevel.Error
-    piiLoggingEnabled = false
-    isAngular = false
-
-    // TODO: move off of instance for smaller property names
-    _user: any
-    _idTokenNonce: any
-    _activeRenewals: any = {}
-    _loginInProgress = false
-    _acquireTokenInProgress = false
-    _renewStates: any[] = []
-    _openedWindows: any[] = []
-    _callBackMappedToRenewStates: any = {}
-    _callBacksMappedToRenewStates: any = {}
-    _requestType = RequestType.LOGIN
-
-    constructor(options: Options) {
-        if ((window as any)._adalInstance) {
-            return (window as any)._adalInstance
-        }
-        this.config = {
-            popUp: false,
-            instance: "https://login.microsoftonline.com/",
-            loginResource: options.clientId,
-            laodFrameTimeout: 6000,
-            anonymousEndpoints: [],
-            navigateToLoginRequestUrl: true,
-            tenant: "common",
-            redirectUri: window.location.href.split("?")[0].split("#")[0],
-            callback: () => {},
-            ...options,
-        }
-        ;(window as any)._adalInstance = this
-    }
-
-    /**
-     * Initiates the login process by redirecting the user to Azure AD authorization endpoint.
-     */
-    login() {
-        if (this._loginInProgress) {
-            this.info("Login in progress")
-            return
-        }
-
-        this._loginInProgress = true
-
-        // Token is not present and user needs to login
-        var expectedState = this._guid()
-        this.config.state = expectedState
-        this._idTokenNonce = this._guid()
-        var loginStartPage = this._getItem(StorageKey.ANGULAR_LOGIN_REQUEST)
-
-        if (!loginStartPage || loginStartPage === "") {
-            loginStartPage = window.location.href
-        } else {
-            this._saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
-        }
-
-        this.verbose(
-            "Expected state: " + expectedState + " startPage:" + loginStartPage,
-        )
-        this._saveItem(StorageKey.LOGIN_REQUEST, loginStartPage)
-        this._saveItem(StorageKey.LOGIN_ERROR, "")
-        this._saveItem(StorageKey.STATE_LOGIN, expectedState, true)
-        this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
-        this._saveItem(StorageKey.ERROR, "")
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
-        var urlNavigate =
-            this._getNavigateUrl("id_token", null) +
-            "&nonce=" +
-            encodeURIComponent(this._idTokenNonce)
-
-        if (this.config.displayCall) {
-            // User defined way of handling the navigation
-            this.config.displayCall(urlNavigate)
-        } else if (this.config.popUp) {
-            this._saveItem(StorageKey.STATE_LOGIN, "") // so requestInfo does not match redirect case
-            this._renewStates.push(expectedState)
-            this.registerCallback(
-                expectedState,
-                this.config.clientId,
-                this.config.callback,
-            )
-            this._loginPopup(urlNavigate)
-        } else {
-            this.promptUser(urlNavigate)
-        }
-    }
-
-    /**
-     * Configures popup window for login.
-     * @ignore
-     */
-    _openPopup(
-        urlNavigate: string,
-        title: string,
-        popUpWidth: number,
-        popUpHeight: number,
-    ) {
-        try {
-            /**
-             * adding winLeft and winTop to account for dual monitor
-             * using screenLeft and screenTop for IE8 and earlier
-             */
-            var winLeft = window.screenLeft ? window.screenLeft : window.screenX
-            var winTop = window.screenTop ? window.screenTop : window.screenY
-            /**
-             * window.innerWidth displays browser window's height and width excluding toolbars
-             * using document.documentElement.clientWidth for IE8 and earlier
-             */
-            var width =
-                window.innerWidth ||
-                document.documentElement.clientWidth ||
-                document.body.clientWidth
-            var height =
-                window.innerHeight ||
-                document.documentElement.clientHeight ||
-                document.body.clientHeight
-            var left = width / 2 - popUpWidth / 2 + winLeft
-            var top = height / 2 - popUpHeight / 2 + winTop
-
-            var popupWindow = window.open(
-                urlNavigate,
-                title,
-                "width=" +
-                    popUpWidth +
-                    ", height=" +
-                    popUpHeight +
-                    ", top=" +
-                    top +
-                    ", left=" +
-                    left,
-            )!
-
-            if (popupWindow.focus) {
-                popupWindow.focus()
-            }
-
-            return popupWindow
-        } catch (e) {
-            this.warn("Error opening popup, " + e.message)
-            this._loginInProgress = false
-            this._acquireTokenInProgress = false
-            return null
-        }
-    }
-
-    _handlePopupError(
-        loginCallback: any,
-        resource: string | undefined | null,
-        error: string,
-        errorDesc: string,
-        loginError: string,
-    ) {
-        this.warn(errorDesc)
-        this._saveItem(StorageKey.ERROR, error)
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, errorDesc)
-        this._saveItem(StorageKey.LOGIN_ERROR, loginError)
-
-        if (resource && this._activeRenewals[resource]) {
-            this._activeRenewals[resource] = null
-        }
-
-        this._loginInProgress = false
-        this._acquireTokenInProgress = false
-
-        if (loginCallback) {
-            loginCallback(errorDesc, null, error)
-        }
-    }
-
-    /**
-     * After authorization, the user will be sent to your specified redirect_uri with the user's bearer token
-     * attached to the URI fragment as an id_token field. It closes popup window after redirection.
-     * @ignore
-     */
-    _loginPopup(urlNavigate: string, resource?: string, callback?: any) {
-        var popupWindow = this._openPopup(
-            urlNavigate,
-            "login",
-            POPUP_WIDTH,
-            POPUP_HEIGHT,
-        )
-        var loginCallback = callback || this.config.callback
-
-        if (popupWindow == null) {
-            var error = "Error opening popup"
-            var errorDesc =
-                "Popup Window is null. This can happen if you are using IE"
-            this._handlePopupError(
-                loginCallback,
-                resource,
-                error,
-                errorDesc,
-                errorDesc,
-            )
-            return
-        }
-
-        this._openedWindows.push(popupWindow)
-
-        if (this.config.redirectUri.indexOf("#") != -1) {
-            var registeredRedirectUri = this.config.redirectUri.split("#")[0]
-        } else {
-            var registeredRedirectUri = this.config.redirectUri
-        }
-
-        var pollTimer = window.setInterval(() => {
-            if (
-                !popupWindow ||
-                popupWindow.closed ||
-                popupWindow.closed === undefined
-            ) {
-                var error = "Popup Window closed"
-                var errorDesc =
-                    "Popup Window closed by UI action/ Popup Window handle destroyed due to cross zone navigation in IE/Edge"
-
-                if (this.isAngular) {
-                    this._broadcast(
-                        "adal:popUpClosed",
-                        errorDesc + RESOURCE_DELIMETER + error,
-                    )
-                }
-
-                this._handlePopupError(
-                    loginCallback,
-                    resource,
-                    error,
-                    errorDesc,
-                    errorDesc,
-                )
-                window.clearInterval(pollTimer)
-                return
-            }
-            try {
-                var popUpWindowLocation = popupWindow.location
-                if (
-                    encodeURI(popUpWindowLocation.href).indexOf(
-                        encodeURI(registeredRedirectUri),
-                    ) != -1
-                ) {
-                    if (this.isAngular) {
-                        this._broadcast(
-                            "adal:popUpHashChanged",
-                            popUpWindowLocation.hash,
-                        )
-                    } else {
-                        this.handleWindowCallback(popUpWindowLocation.hash)
-                    }
-
-                    window.clearInterval(pollTimer)
-                    this._loginInProgress = false
-                    this._acquireTokenInProgress = false
-                    this.info("Closing popup window")
-                    this._openedWindows = []
-                    popupWindow.close()
-                    return
-                }
-            } catch (e) {}
-        }, 1)
-    }
-
-    _broadcast(eventName: string, data: any) {
-        // Custom Event is not supported in IE, below IIFE will polyfill the CustomEvent() constructor functionality in Internet Explorer 9 and higher
-        ;(function () {
-            if (typeof window.CustomEvent === "function") {
-                return false
-            }
-
-            function CustomEvent(event, params) {
-                params = params || {
-                    bubbles: false,
-                    cancelable: false,
-                    detail: undefined,
-                }
-                var evt = document.createEvent("CustomEvent")
-                evt.initCustomEvent(
-                    event,
-                    params.bubbles,
-                    params.cancelable,
-                    params.detail,
-                )
-                return evt
-            }
-
-            CustomEvent.prototype = window.Event.prototype
-            window.CustomEvent = CustomEvent
-        })()
-
-        var evt = new CustomEvent(eventName, {detail: data})
-        window.dispatchEvent(evt)
-    }
-
-    loginInProgress() {
-        return this._loginInProgress
-    }
-
-    /**
-     * Checks for the resource in the cache. By default, cache location is Session Storage
-     * @ignore
-     * @returns {Boolean} 'true' if login is in progress, else returns 'false'.
-     */
-    _hasResource(key) {
-        var keys = this._getItem(StorageKey.TOKEN_KEYS)
-        // @ts-expect-error
-        return (
-            keys &&
-            !this._isEmpty(keys) &&
-            keys.indexOf(key + RESOURCE_DELIMETER) > -1
-        )
-    }
-
-    /**
-     * Gets token for the specified resource from the cache.
-     * @param {string}   resource A URI that identifies the resource for which the token is requested.
-     * @returns {string} token if if it exists and not expired, otherwise null.
-     */
-    getCachedToken(resource: string) {
-        if (!this._hasResource(resource)) {
-            return null
-        }
-
-        var token = this._getItem(StorageKey.ACCESS_TOKEN_KEY + resource)
-        var expiry = this._getItem(StorageKey.EXPIRATION_KEY + resource)
-
-        // If expiration is within offset, it will force renew
-        var offset = this.config.expireOffsetSeconds || 300
-
-        // @ts-expect-error
-        if (expiry && expiry > this._now() + offset) {
-            return token
-        } else {
-            this._saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
-            this._saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
-            return null
-        }
-    }
-
-    /**
-     * User information from idtoken.
-     *  @class User
-     *  @property {string} userName - username assigned from upn or email.
-     *  @property {object} profile - properties parsed from idtoken.
-     */
-
-    /**
-     * If user object exists, returns it. Else creates a new user object by decoding id_token from the cache.
-     * @returns {User} user object
-     */
-    getCachedUser() {
-        if (this._user) {
-            return this._user
-        }
-
-        var idtoken = this._getItem(StorageKey.IDTOKEN)
-        this._user = this._createUser(idtoken)
-        return this._user
-    }
-
-    /**
-     * Adds the passed callback to the array of callbacks for the specified resource and puts the array on the window object.
-     * @param {string}   resource A URI that identifies the resource for which the token is requested.
-     * @param {string}   expectedState A unique identifier (guid).
-     * @param {tokenCallback} callback - The callback provided by the caller. It will be called with token or error.
-     */
-    registerCallback(expectedState: any, resource: string, callback: any) {
-        this._activeRenewals[resource] = expectedState
-
-        if (!this._callBacksMappedToRenewStates[expectedState]) {
-            this._callBacksMappedToRenewStates[expectedState] = []
-        }
-
-        this._callBacksMappedToRenewStates[expectedState].push(callback)
-
-        if (!this._callBackMappedToRenewStates[expectedState]) {
-            this._callBackMappedToRenewStates[expectedState] = (
-                errorDesc,
-                token,
-                error,
-                tokenType,
-            ) => {
-                this._activeRenewals[resource] = null
-
-                for (
-                    var i = 0;
-                    i <
-                    this._callBacksMappedToRenewStates[expectedState].length;
-                    ++i
-                ) {
-                    try {
-                        this._callBacksMappedToRenewStates[expectedState][i](
-                            errorDesc,
-                            token,
-                            error,
-                            tokenType,
-                        )
-                    } catch (error) {
-                        this.warn(error)
-                    }
-                }
-
-                this._callBacksMappedToRenewStates[expectedState] = null
-                this._callBackMappedToRenewStates[expectedState] = null
-            }
-        }
-    }
-
-    // var errorResponse = {error:'', error_description:''};
-    // var token = 'string token';
-    // callback(errorResponse, token)
-    // with callback
-    /**
-     * Acquires access token with hidden iframe
-     * @ignore
-     */
-    _renewToken(resource, callback, responseType) {
-        // use iframe to try to renew token
-        // use given resource to create new authz url
-        this.info("renewToken is called for resource:" + resource)
-        var frameHandle = this._addAdalFrame("adalRenewFrame" + resource)
-        var expectedState = this._guid() + "|" + resource
-        this.config.state = expectedState
-        // renew happens in iframe, so it keeps javascript context
-        this._renewStates.push(expectedState)
-        this.verbose("Renew token Expected state: " + expectedState)
-        // remove the existing prompt=... query parameter and add prompt=none
-        responseType = responseType || "token"
-        var urlNavigate = this._urlRemoveQueryStringParameter(
-            this._getNavigateUrl(responseType, resource),
-            "prompt",
-        )
-
-        if (responseType === ResponseType.ID_TOKEN) {
-            this._idTokenNonce = this._guid()
-            this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
-            urlNavigate += "&nonce=" + encodeURIComponent(this._idTokenNonce)
-        }
-
-        urlNavigate = urlNavigate + "&prompt=none"
-        urlNavigate = this._addHintParameters(urlNavigate)
-        this.registerCallback(expectedState, resource, callback)
-        this.verbosePii("Navigate to:" + urlNavigate)
-        // @ts-expect-error
-        frameHandle.src = "about:blank"
-        this._loadFrameTimeout(
-            urlNavigate,
-            "adalRenewFrame" + resource,
-            resource,
-        )
-    }
-
-    /**
-     * Renews idtoken for app's own backend when resource is clientId and calls the callback with token/error
-     * @ignore
-     */
-    _renewIdToken(callback, responseType) {
-        // use iframe to try to renew token
-        this.info("renewIdToken is called")
-        var frameHandle = this._addAdalFrame("adalIdTokenFrame")
-        var expectedState = this._guid() + "|" + this.config.clientId
-        this._idTokenNonce = this._guid()
-        this._saveItem(StorageKey.NONCE_IDTOKEN, this._idTokenNonce, true)
-        this.config.state = expectedState
-        // renew happens in iframe, so it keeps javascript context
-        this._renewStates.push(expectedState)
-        this.verbose("Renew Idtoken Expected state: " + expectedState)
-        // remove the existing prompt=... query parameter and add prompt=none
-        var resource =
-            responseType === null || typeof responseType === "undefined"
-                ? null
-                : this.config.clientId
-        var responseType = responseType || "id_token"
-        var urlNavigate = this._urlRemoveQueryStringParameter(
-            this._getNavigateUrl(responseType, resource),
-            "prompt",
-        )
-        urlNavigate = urlNavigate + "&prompt=none"
-        urlNavigate = this._addHintParameters(urlNavigate)
-        urlNavigate += "&nonce=" + encodeURIComponent(this._idTokenNonce)
-        this.registerCallback(expectedState, this.config.clientId, callback)
-        this.verbosePii("Navigate to:" + urlNavigate)
-        // @ts-expect-error
-        frameHandle.src = "about:blank"
-        this._loadFrameTimeout(
-            urlNavigate,
-            "adalIdTokenFrame",
-            this.config.clientId,
-        )
-    }
-
-    /**
-     * Checks if the authorization endpoint URL contains query string parameters
-     * @ignore
-     */
-    _urlContainsQueryStringParameter = function (name, url) {
-        // regex to detect pattern of a ? or & followed by the name parameter and an equals character
-        var regex = new RegExp("[\\?&]" + name + "=")
-        return regex.test(url)
-    }
-
-    /**
-     * Removes the query string parameter from the authorization endpoint URL if it exists
-     * @ignore
-     */
-    _urlRemoveQueryStringParameter = function (url, name) {
-        // we remove &name=value, name=value& and name=value
-        // &name=value
-        var regex = new RegExp("(\\&" + name + "=)[^&]+")
-        url = url.replace(regex, "")
-        // name=value&
-        regex = new RegExp("(" + name + "=)[^&]+&")
-        url = url.replace(regex, "")
-        // name=value
-        regex = new RegExp("(" + name + "=)[^&]+")
-        url = url.replace(regex, "")
-        return url
-    }
-
-    // Calling _loadFrame but with a timeout to signal failure in loadframeStatus. Callbacks are left
-    // registered when network errors occur and subsequent token requests for same resource are registered to the pending request
-    /**
-     * @ignore
-     */
-    _loadFrameTimeout = function (urlNavigation, frameName, resource) {
-        //set iframe session to pending
-        this.verbose("Set loading state to pending for: " + resource)
-        this._saveItem(
-            StorageKey.RENEW_STATUS + resource,
-            TokenRenewStatus.InProgress,
-        )
-        this._loadFrame(urlNavigation, frameName)
-
-        setTimeout(() => {
-            if (
-                this._getItem(
-                    StorageKey.RENEW_STATUS + resource,
-                ) === TokenRenewStatus.InProgress
-            ) {
-                // fail the iframe session if it's in pending state
-                this.verbose(
-                    "Loading frame has timed out after: " +
-                        this.config.loadFrameTimeout / 1000 +
-                        " seconds for resource " +
-                        resource,
-                )
-                var expectedState = this._activeRenewals[resource]
-
-                if (
-                    expectedState &&
-                    this._callBackMappedToRenewStates[expectedState]
-                ) {
-                    this._callBackMappedToRenewStates[expectedState](
-                        "Token renewal operation failed due to timeout",
-                        null,
-                        "Token Renewal Failed",
-                    )
-                }
-
-                this._saveItem(
-                    StorageKey.RENEW_STATUS + resource,
-                    TokenRenewStatus.Canceled,
-                )
-            }
-        }, this.config.loadFrameTimeout)
-    }
-
-    /**
-     * Loads iframe with authorization endpoint URL
-     * @ignore
-     */
-    _loadFrame(urlNavigate, frameName) {
-        // This trick overcomes iframe navigation in IE
-        // IE does not load the page consistently in iframe
-        this.info("LoadFrame: " + frameName)
-        setTimeout(() => {
-            var frameHandle = this._addAdalFrame(frameName) as any
-            if (frameHandle.src === "" || frameHandle.src === "about:blank") {
-                frameHandle.src = urlNavigate
-                this._loadFrame(urlNavigate, frameName)
-            }
-        }, 500)
-    }
-
-    /**
-     * @callback tokenCallback
-     * @param {string} error_description error description returned from AAD if token request fails.
-     * @param {string} token token returned from AAD if token request is successful.
-     * @param {string} error error message returned from AAD if token request fails.
-     */
-
-    /**
-     * Acquires token from the cache if it is not expired. Otherwise sends request to AAD to obtain a new token.
-     * @param {string}   resource  ResourceUri identifying the target resource
-     * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
-     */
-    acquireToken(resource, callback) {
-        if (this._isEmpty(resource)) {
-            this.warn("resource is required")
-            callback("resource is required", null, "resource is required")
-            return
-        }
-
-        var token = this.getCachedToken(resource)
-
-        if (token) {
-            this.info("Token is already in cache for resource:" + resource)
-            callback(null, token, null)
-            return
-        }
-
-        if (
-            !this._user &&
-            !(
-                this.config.extraQueryParameter &&
-                this.config.extraQueryParameter.indexOf("login_hint") !== -1
-            )
-        ) {
-            this.warn("User login is required")
-            callback("User login is required", null, "login required")
-            return
-        }
-
-        // renew attempt with iframe
-        // Already renewing for this resource, callback when we get the token.
-        if (this._activeRenewals[resource]) {
-            // Active renewals contains the state for each renewal.
-            this.registerCallback(
-                this._activeRenewals[resource],
-                resource,
-                callback,
-            )
-        } else {
-            this._requestType = RequestType.RENEW_TOKEN
-            if (resource === this.config.clientId) {
-                // App uses idtoken to send to api endpoints
-                // Default resource is tracked as clientid to store this token
-                if (this._user) {
-                    this.verbose("renewing idtoken")
-                    this._renewIdToken(callback)
-                } else {
-                    this.verbose("renewing idtoken and access_token")
-                    this._renewIdToken(callback, ResponseType.ID_TOKEN)
-                }
-            } else {
-                if (this._user) {
-                    this.verbose("renewing access_token")
-                    this._renewToken(resource, callback)
-                } else {
-                    this.verbose("renewing idtoken and access_token")
-                    this._renewToken(resource, callback, ResponseType.ID_TOKEN)
-                }
-            }
-        }
-    }
-
-    /**
-     * Acquires token (interactive flow using a popUp window) by sending request to AAD to obtain a new token.
-     * @param {string}   resource  ResourceUri identifying the target resource
-     * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
-     * @param {tokenCallback} callback -  The callback provided by the caller. It will be called with token or error.
-     */
-    acquireTokenPopup(resource, extraQueryParameters, claims, callback) {
-        if (this._isEmpty(resource)) {
-            this.warn("resource is required")
-            callback("resource is required", null, "resource is required")
-            return
-        }
-
-        if (!this._user) {
-            this.warn("User login is required")
-            callback("User login is required", null, "login required")
-            return
-        }
-
-        if (this._acquireTokenInProgress) {
-            this.warn("Acquire token interactive is already in progress")
-            callback(
-                "Acquire token interactive is already in progress",
-                null,
-                "Acquire token interactive is already in progress",
-            )
-            return
-        }
-
-        var expectedState = this._guid() + "|" + resource
-        this.config.state = expectedState
-        this._renewStates.push(expectedState)
-        this._requestType = RequestType.RENEW_TOKEN
-        this.verbose("Renew token Expected state: " + expectedState)
-        // remove the existing prompt=... query parameter and add prompt=select_account
-        var urlNavigate = this._urlRemoveQueryStringParameter(
-            this._getNavigateUrl("token", resource),
-            "prompt",
-        )
-        urlNavigate = urlNavigate + "&prompt=select_account"
-
-        if (extraQueryParameters) {
-            urlNavigate += extraQueryParameters
-        }
-
-        if (claims && urlNavigate.indexOf("&claims") === -1) {
-            urlNavigate += "&claims=" + encodeURIComponent(claims)
-        } else if (claims && urlNavigate.indexOf("&claims") !== -1) {
-            throw new Error("Claims cannot be passed as an extraQueryParameter")
-        }
-
-        urlNavigate = this._addHintParameters(urlNavigate)
-        this._acquireTokenInProgress = true
-        this.info(
-            "acquireToken interactive is called for the resource " + resource,
-        )
-        this.registerCallback(expectedState, resource, callback)
-        this._loginPopup(urlNavigate, resource, callback)
-    }
-
-    /**
-     * Acquires token (interactive flow using a redirect) by sending request to AAD to obtain a new token. In this case the callback passed in the Authentication
-     * request constructor will be called.
-     * @param {string}   resource  ResourceUri identifying the target resource
-     * @param {string}   extraQueryParameters  extraQueryParameters to add to the authentication request
-     */
-    acquireTokenRedirect(resource, extraQueryParameters, claims) {
-        const {callback} = this.config
-
-        if (this._isEmpty(resource)) {
-            this.warn("resource is required")
-            callback("resource is required", null, "resource is required")
-            return
-        }
-
-        if (!this._user) {
-            this.warn("User login is required")
-            callback("User login is required", null, "login required")
-            return
-        }
-
-        if (this._acquireTokenInProgress) {
-            this.warn("Acquire token interactive is already in progress")
-            callback(
-                "Acquire token interactive is already in progress",
-                null,
-                "Acquire token interactive is already in progress",
-            )
-            return
-        }
-
-        var expectedState = this._guid() + "|" + resource
-        this.config.state = expectedState
-        this.verbose("Renew token Expected state: " + expectedState)
-
-        // remove the existing prompt=... query parameter and add prompt=select_account
-        var urlNavigate = this._urlRemoveQueryStringParameter(
-            this._getNavigateUrl("token", resource),
-            "prompt",
-        )
-        urlNavigate = urlNavigate + "&prompt=select_account"
-        if (extraQueryParameters) {
-            urlNavigate += extraQueryParameters
-        }
-
-        if (claims && urlNavigate.indexOf("&claims") === -1) {
-            urlNavigate += "&claims=" + encodeURIComponent(claims)
-        } else if (claims && urlNavigate.indexOf("&claims") !== -1) {
-            throw new Error("Claims cannot be passed as an extraQueryParameter")
-        }
-
-        urlNavigate = this._addHintParameters(urlNavigate)
-        this._acquireTokenInProgress = true
-        this.info(
-            "acquireToken interactive is called for the resource " + resource,
-        )
-        this._saveItem(StorageKey.LOGIN_REQUEST, window.location.href)
-        this._saveItem(StorageKey.STATE_RENEW, expectedState, true)
-        this.promptUser(urlNavigate)
-    }
-
-    /**
-     * Redirects the browser to Azure AD authorization endpoint.
-     * @param {string}   urlNavigate  Url of the authorization endpoint.
-     */
-    promptUser(urlNavigate: string) {
-        if (urlNavigate) {
-            this.infoPii("Navigate to:" + urlNavigate)
-            window.location.replace(urlNavigate)
-        } else {
-            this.info("Navigate url is empty")
-        }
-    }
-
-    /**
-     * Clears cache items.
-     */
-    clearCache() {
-        this._saveItem(StorageKey.LOGIN_REQUEST, "")
-        this._saveItem(StorageKey.ANGULAR_LOGIN_REQUEST, "")
-        this._saveItem(StorageKey.SESSION_STATE, "")
-        this._saveItem(StorageKey.STATE_LOGIN, "")
-        this._saveItem(StorageKey.STATE_RENEW, "")
-        this._renewStates = []
-        this._saveItem(StorageKey.NONCE_IDTOKEN, "")
-        this._saveItem(StorageKey.IDTOKEN, "")
-        this._saveItem(StorageKey.ERROR, "")
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
-        this._saveItem(StorageKey.LOGIN_ERROR, "")
-        this._saveItem(StorageKey.LOGIN_ERROR, "")
-        var keys = this._getItem(StorageKey.TOKEN_KEYS) as any
-
-        if (!this._isEmpty(keys)) {
-            keys = keys.split(RESOURCE_DELIMETER)
-            for (var i = 0; i < keys.length && keys[i] !== ""; i++) {
-                this._saveItem(StorageKey.ACCESS_TOKEN_KEY + keys[i], "")
-                this._saveItem(StorageKey.EXPIRATION_KEY + keys[i], 0)
-            }
-        }
-
-        this._saveItem(StorageKey.TOKEN_KEYS, "")
-    }
-
-    /**
-     * Clears cache items for a given resource.
-     * @param {string}  resource a URI that identifies the resource.
-     */
-    clearCacheForResource(resource: string) {
-        this._saveItem(StorageKey.STATE_RENEW, "")
-        this._saveItem(StorageKey.ERROR, "")
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
-
-        if (this._hasResource(resource)) {
-            this._saveItem(StorageKey.ACCESS_TOKEN_KEY + resource, "")
-            this._saveItem(StorageKey.EXPIRATION_KEY + resource, 0)
-        }
-    }
-
-    /**
-     * Redirects user to logout endpoint.
-     * After logout, it will redirect to postLogoutRedirectUri if added as a property on the config object.
-     */
-    logOut() {
-        this.clearCache()
-        this._user = null
-        var urlNavigate
-
-        if (this.config.logOutUri) {
-            urlNavigate = this.config.logOutUri
-        } else {
-            var tenant = "common"
-            var logout = ""
-
-            if (this.config.tenant) {
-                tenant = this.config.tenant
-            }
-
-            if (this.config.postLogoutRedirectUri) {
-                logout =
-                    "post_logout_redirect_uri=" +
-                    encodeURIComponent(this.config.postLogoutRedirectUri)
-            }
-
-            urlNavigate = this.config.instance + tenant + "/oauth2/logout?" + logout
-        }
-
-        this.infoPii("Logout navigate to: " + urlNavigate)
-        this.promptUser(urlNavigate)
-    }
-
-    _isEmpty(str) {
-        return typeof str === "undefined" || !str || 0 === str.length
-    }
-
-    /**
-     * @callback userCallback
-     * @param {string} error error message if user info is not available.
-     * @param {User} user user object retrieved from the cache.
-     */
-
-    /**
-     * Calls the passed in callback with the user object or error message related to the user.
-     * @param {userCallback} callback - The callback provided by the caller. It will be called with user or error.
-     */
-    getUser(callback) {
-        // IDToken is first call
-        if (typeof callback !== "function") {
-            throw new Error("callback is not a function")
-        }
-
-        // user in memory
-        if (this._user) {
-            callback(null, this._user)
-            return
-        }
-
-        // frame is used to get idtoken
-        var idtoken = this._getItem(StorageKey.IDTOKEN)
-
-        if (!this._isEmpty(idtoken)) {
-            this.info("User exists in cache: ")
-            this._user = this._createUser(idtoken)
-            callback(null, this._user)
-        } else {
-            this.warn("User information is not available")
-            callback("User information is not available", null)
-        }
-    }
-
-    /**
-     * Adds login_hint to authorization URL which is used to pre-fill the username field of sign in page for the user if known ahead of time.
-     * domain_hint can be one of users/organisations which when added skips the email based discovery process of the user.
-     * @ignore
-     */
-    _addHintParameters = function (urlNavigate) {
-        //If you dont use prompt=none, then if the session does not exist, there will be a failure.
-        //If sid is sent alongside domain or login hints, there will be a failure since request is ambiguous.
-        //If sid is sent with a prompt value other than none or attempt_none, there will be a failure since the request is ambiguous.
-
-        if (this._user && this._user.profile) {
-            if (
-                this._user.profile.sid &&
-                urlNavigate.indexOf("&prompt=none") !== -1
-            ) {
-                // don't add sid twice if user provided it in the extraQueryParameter value
-                if (
-                    !this._urlContainsQueryStringParameter("sid", urlNavigate)
-                ) {
-                    // add sid
-                    urlNavigate +=
-                        "&sid=" + encodeURIComponent(this._user.profile.sid)
-                }
-            } else if (this._user.profile.upn) {
-                // don't add login_hint twice if user provided it in the extraQueryParameter value
-                if (
-                    !this._urlContainsQueryStringParameter(
-                        "login_hint",
-                        urlNavigate,
-                    )
-                ) {
-                    // add login_hint
-                    urlNavigate +=
-                        "&login_hint=" +
-                        encodeURIComponent(this._user.profile.upn)
-                }
-                // don't add domain_hint twice if user provided it in the extraQueryParameter value
-                if (
-                    !this._urlContainsQueryStringParameter(
-                        "domain_hint",
-                        urlNavigate,
-                    ) &&
-                    this._user.profile.upn.indexOf("@") > -1
-                ) {
-                    var parts = this._user.profile.upn.split("@")
-                    // local part can include @ in quotes. Sending last part handles that.
-                    urlNavigate +=
-                        "&domain_hint=" +
-                        encodeURIComponent(parts[parts.length - 1])
-                }
-            }
-        }
-
-        return urlNavigate
-    }
-
-    /**
-     * Creates a user object by decoding the id_token
-     * @ignore
-     */
-    _createUser(idToken) {
-        var user = null
-        var parsedJson = this._extractIdToken(idToken)
-        if (parsedJson && parsedJson.hasOwnProperty("aud")) {
-            if (
-                parsedJson.aud.toLowerCase() ===
-                this.config.clientId.toLowerCase()
-            ) {
-                user = {
-                    userName: "",
-                    profile: parsedJson,
-                }
-
-                if (parsedJson.hasOwnProperty("upn")) {
-                    user.userName = parsedJson.upn
-                } else if (parsedJson.hasOwnProperty("email")) {
-                    user.userName = parsedJson.email
-                }
-            } else {
-                this.warn("IdToken has invalid aud field")
-            }
-        }
-
-        return user
-    }
-
-    /**
-     * Returns the anchor part(#) of the URL
-     * @ignore
-     */
-    _getHash(hash) {
-        if (hash.indexOf("#/") > -1) {
-            hash = hash.substring(hash.indexOf("#/") + 2)
-        } else if (hash.indexOf("#") > -1) {
-            hash = hash.substring(1)
-        }
-
-        return hash
-    }
-
-    /**
-     * Checks if the URL fragment contains access token, id token or error_description.
-     * @param {string} hash  -  Hash passed from redirect page
-     * @returns {Boolean} true if response contains id_token, access_token or error, false otherwise.
-     */
-    isCallback(hash) {
-        hash = this._getHash(hash)
-        var parameters = this._deserialize(hash)
-        return (
-            parameters.hasOwnProperty(ERROR_DESCRIPTION) ||
-            parameters.hasOwnProperty(ACCESS_TOKEN) ||
-            parameters.hasOwnProperty(ID_TOKEN)
-        )
-    }
-
-    /**
-     * Gets login error
-     * @returns {string} error message related to login.
-     */
-    getLoginError() {
-        return this._getItem(StorageKey.LOGIN_ERROR)
-    }
-
-    /**
-     * Request info object created from the response received from AAD.
-     *  @class RequestInfo
-     *  @property {object} parameters - object comprising of fields such as id_token/error, session_state, state, e.t.c.
-     *  @property {REQUEST_TYPE} requestType - either LOGIN, RENEW_TOKEN or UNKNOWN.
-     *  @property {boolean} stateMatch - true if state is valid, false otherwise.
-     *  @property {string} stateResponse - unique guid used to match the response with the request.
-     *  @property {boolean} valid - true if requestType contains id_token, access_token or error, false otherwise.
-     */
-
-    /**
-     * Creates a requestInfo object from the URL fragment and returns it.
-     * @returns {RequestInfo} an object created from the redirect response from AAD comprising of the keys - parameters, requestType, stateMatch, stateResponse and valid.
-     */
-    getRequestInfo(hash) {
-        hash = this._getHash(hash)
-        var parameters = this._deserialize(hash)
-        var requestInfo = {
-            valid: false,
-            parameters: {},
-            stateMatch: false,
-            stateResponse: "",
-            requestType: RequestType.UNKNOWN,
-        }
-
-        if (parameters) {
-            requestInfo.parameters = parameters
-            if (
-                parameters.hasOwnProperty(ERROR_DESCRIPTION) ||
-                parameters.hasOwnProperty(ACCESS_TOKEN) ||
-                parameters.hasOwnProperty(ID_TOKEN)
-            ) {
-                requestInfo.valid = true
-
-                // which call
-                var stateResponse = ""
-                if (parameters.hasOwnProperty("state")) {
-                    this.verbose("State: " + parameters.state)
-                    stateResponse = parameters.state
-                } else {
-                    this.warn("No state returned")
-                    return requestInfo
-                }
-
-                requestInfo.stateResponse = stateResponse
-
-                // async calls can fire iframe and login request at the same time if developer does not use the API as expected
-                // incoming callback needs to be looked up to find the request type
-                if (this._matchState(requestInfo)) {
-                    // loginRedirect or acquireTokenRedirect
-                    return requestInfo
-                }
-
-                // external api requests may have many renewtoken requests for different resource
-                if (!requestInfo.stateMatch && window.parent) {
-                    requestInfo.requestType = this._requestType
-                    var statesInParentContext = this._renewStates
-                    for (var i = 0; i < statesInParentContext.length; i++) {
-                        if (
-                            statesInParentContext[i] ===
-                            requestInfo.stateResponse
-                        ) {
-                            requestInfo.stateMatch = true
-                            break
-                        }
-                    }
-                }
-            }
-        }
-        return requestInfo
-    }
-
-    /**
-     * Matches nonce from the request with the response.
-     * @ignore
-     */
-    _matchNonce(user) {
-        var requestNonce = this._getItem(StorageKey.NONCE_IDTOKEN)
-
-        if (requestNonce) {
-            requestNonce = requestNonce.split(CACHE_DELIMETER)
-            for (var i = 0; i < requestNonce.length; i++) {
-                if (requestNonce[i] === user.profile.nonce) {
-                    return true
-                }
-            }
-        }
-
-        return false
-    }
-
-    /**
-     * Matches state from the request with the response.
-     * @ignore
-     */
-    _matchState(requestInfo) {
-        var loginStates = this._getItem(StorageKey.STATE_LOGIN)
-
-        if (loginStates) {
-            loginStates = loginStates.split(CACHE_DELIMETER)
-            for (var i = 0; i < loginStates.length; i++) {
-                if (loginStates[i] === requestInfo.stateResponse) {
-                    requestInfo.requestType = RequestType.LOGIN
-                    requestInfo.stateMatch = true
-                    return true
-                }
-            }
-        }
-
-        var acquireTokenStates = this._getItem(StorageKey.STATE_RENEW)
-
-        if (acquireTokenStates) {
-            acquireTokenStates = acquireTokenStates.split(CACHE_DELIMETER)
-            for (var i = 0; i < acquireTokenStates.length; i++) {
-                if (acquireTokenStates[i] === requestInfo.stateResponse) {
-                    requestInfo.requestType = RequestType.RENEW_TOKEN
-                    requestInfo.stateMatch = true
-                    return true
-                }
-            }
-        }
-
-        return false
-    }
-
-    /**
-     * Extracts resource value from state.
-     * @ignore
-     */
-    _getResourceFromState(state) {
-        if (state) {
-            var splitIndex = state.indexOf("|")
-
-            if (splitIndex > -1 && splitIndex + 1 < state.length) {
-                return state.substring(splitIndex + 1)
-            }
-        }
-
-        return ""
-    }
-
-    /**
-     * Saves token or error received in the response from AAD in the cache. In case of id_token, it also creates the user object.
-     */
-    saveTokenFromHash(requestInfo) {
-        this.info(
-            "State status:" +
-                requestInfo.stateMatch +
-                "; Request type:" +
-                requestInfo.requestType,
-        )
-        this._saveItem(StorageKey.ERROR, "")
-        this._saveItem(StorageKey.ERROR_DESCRIPTION, "")
-
-        var resource = this._getResourceFromState(requestInfo.stateResponse)
-
-        // Record error
-        if (requestInfo.parameters.hasOwnProperty(ERROR_DESCRIPTION)) {
-            this.infoPii(
-                "Error :" +
-                    requestInfo.parameters.error +
-                    "; Error description:" +
-                    requestInfo.parameters[ERROR_DESCRIPTION],
-            )
-            this._saveItem(StorageKey.ERROR, requestInfo.parameters.error)
-            this._saveItem(
-                StorageKey.ERROR_DESCRIPTION,
-                requestInfo.parameters[ERROR_DESCRIPTION],
-            )
-
-            if (requestInfo.requestType === RequestType.LOGIN) {
-                this._loginInProgress = false
-                this._saveItem(
-                    StorageKey.LOGIN_ERROR,
-                    requestInfo.parameters.error_description,
-                )
-            }
-        } else {
-            // It must verify the state from redirect
-            if (requestInfo.stateMatch) {
-                // record tokens to storage if exists
-                this.info("State is right")
-                if (requestInfo.parameters.hasOwnProperty(SESSION_STATE)) {
-                    this._saveItem(
-                        StorageKey.SESSION_STATE,
-                        requestInfo.parameters[SESSION_STATE],
-                    )
-                }
-
-                var keys
-
-                if (requestInfo.parameters.hasOwnProperty(ACCESS_TOKEN)) {
-                    this.info("Fragment has access token")
-
-                    if (!this._hasResource(resource)) {
-                        keys = this._getItem(StorageKey.TOKEN_KEYS) || ""
-                        this._saveItem(
-                            StorageKey.TOKEN_KEYS,
-                            keys + resource + RESOURCE_DELIMETER,
-                        )
-                    }
-
-                    // save token with related resource
-                    this._saveItem(
-                        StorageKey.ACCESS_TOKEN_KEY + resource ,
-                        requestInfo.parameters[ACCESS_TOKEN],
-                    )
-                    this._saveItem(
-                        StorageKey.EXPIRATION_KEY + resource ,
-                        this._expiresIn(requestInfo.parameters[EXPIRES_IN]),
-                    )
-                }
-
-                if (requestInfo.parameters.hasOwnProperty(ID_TOKEN)) {
-                    this.info("Fragment has id token")
-                    this._loginInProgress = false
-                    this._user = this._createUser(
-                        requestInfo.parameters[ID_TOKEN],
-                    )
-                    if (this._user && this._user.profile) {
-                        if (!this._matchNonce(this._user)) {
-                            this._saveItem(
-                                StorageKey.LOGIN_ERROR,
-                                "Nonce received: " +
-                                    this._user.profile.nonce +
-                                    " is not same as requested: " +
-                                    this._getItem(StorageKey.NONCE_IDTOKEN),
-                            )
-                            this._user = null
-                        } else {
-                            this._saveItem(
-                                StorageKey.IDTOKEN,
-                                requestInfo.parameters[ID_TOKEN],
-                            )
-
-                            // Save idtoken as access token for app itself
-                            resource = this.config.loginResource
-                                ? this.config.loginResource
-                                : this.config.clientId
-
-                            if (!this._hasResource(resource)) {
-                                keys =
-                                    this._getItem(StorageKey.TOKEN_KEYS) || ""
-                                this._saveItem(
-                                    StorageKey.TOKEN_KEYS,
-                                    keys + resource + RESOURCE_DELIMETER,
-                                )
-                            }
-
-                            this._saveItem(
-                                StorageKey.ACCESS_TOKEN_KEY + resource ,
-                                requestInfo.parameters[ID_TOKEN],
-                            )
-                            this._saveItem(
-                                StorageKey.EXPIRATION_KEY + resource ,
-                                this._user.profile.exp,
-                            )
-                        }
-                    } else {
-                        requestInfo.parameters["error"] = "invalid id_token"
-                        requestInfo.parameters["error_description"] =
-                            "Invalid id_token. id_token: " +
-                            requestInfo.parameters[ID_TOKEN]
-                        this._saveItem(StorageKey.ERROR, "invalid id_token")
-                        this._saveItem(
-                            StorageKey.ERROR_DESCRIPTION,
-                            "Invalid id_token. id_token: " +
-                                requestInfo.parameters[ID_TOKEN],
-                        )
-                    }
-                }
-            } else {
-                requestInfo.parameters["error"] = "Invalid_state"
-                requestInfo.parameters["error_description"] =
-                    "Invalid_state. state: " + requestInfo.stateResponse
-                this._saveItem(StorageKey.ERROR, "Invalid_state")
-                this._saveItem(
-                    StorageKey.ERROR_DESCRIPTION,
-                    "Invalid_state. state: " + requestInfo.stateResponse,
-                )
-            }
-        }
-
-        this._saveItem(
-            StorageKey.RENEW_STATUS + resource ,
-            TokenRenewStatus.COMPLETED,
-        )
-    }
-
-    /**
-     * Gets resource for given endpoint if mapping is provided with config.
-     * @param {string} endpoint  -  The URI for which the resource Id is requested.
-     * @returns {string} resource for this API endpoint.
-     */
-    getResourceForEndpoint(endpoint: string) {
-        // if user specified list of anonymous endpoints, no need to send token to these endpoints, return null.
-        if (this.config && this.config.anonymousEndpoints) {
-            for (var i = 0; i < this.config.anonymousEndpoints.length; i++) {
-                if (endpoint.indexOf(this.config.anonymousEndpoints[i]) > -1) {
-                    return null
-                }
-            }
-        }
-
-        if (this.config && this.config.endpoints) {
-            for (var configEndpoint in this.config.endpoints) {
-                // configEndpoint is like /api/Todo requested endpoint can be /api/Todo/1
-                if (endpoint.indexOf(configEndpoint) > -1) {
-                    return this.config.endpoints[configEndpoint]
-                }
-            }
-        }
-
-        // default resource will be clientid if nothing specified
-        // App will use idtoken for calls to itself
-        // check if it's staring from http or https, needs to match with app host
-        if (
-            endpoint.indexOf("http://") > -1 ||
-            endpoint.indexOf("https://") > -1
-        ) {
-            if (
-                this._getHostFromUri(endpoint) ===
-                this._getHostFromUri(this.config.redirectUri)
-            ) {
-                return this.config.loginResource
-            }
-        } else {
-            // in angular level, the url for $http interceptor call could be relative url,
-            // if it's relative call, we'll treat it as app backend call.
-            return this.config.loginResource
-        }
-
-        // if not the app's own backend or not a domain listed in the endpoints structure
-        return null
-    }
-
-    /**
-     * Strips the protocol part of the URL and returns it.
-     * @ignore
-     */
-    _getHostFromUri(uri: string) {
-        // remove http:// or https:// from uri
-        var extractedUri = String(uri).replace(/^(https?:)\/\//, "")
-        extractedUri = extractedUri.split("/")[0]
-        return extractedUri
-    }
-
-    /**
-     * This method must be called for processing the response received from AAD. It extracts the hash, processes the token or error, saves it in the cache and calls the registered callbacks with the result.
-     * @param {string} [hash=window.location.hash] - Hash fragment of Url.
-     */
-    handleWindowCallback(hash: string) {
-        // This is for regular javascript usage for redirect handling
-        // need to make sure this is for callback
-        if (hash == null) {
-            hash = window.location.hash
-        }
-
-        if (this.isCallback(hash)) {
-            var self: Adal = null as any
-            var isPopup = false
-
-            if (
-                this._openedWindows.length > 0 &&
-                this._openedWindows[this._openedWindows.length - 1].opener &&
-                this._openedWindows[this._openedWindows.length - 1].opener
-                    ._adalInstance
-            ) {
-                self = this._openedWindows[this._openedWindows.length - 1]
-                    .opener._adalInstance
-                isPopup = true
-            }
-            // @ts-ignore
-            else if (window.parent && window.parent._adalInstance) {
-                // @ts-ignore
-                self = window.parent._adalInstance
-            }
-
-            var requestInfo = self.getRequestInfo(hash)
-            var token,
-                tokenReceivedCallback,
-                tokenType = null
-
-            if (isPopup || window.parent !== window) {
-                tokenReceivedCallback =
-                    self._callBackMappedToRenewStates[requestInfo.stateResponse]
-            } else {
-                tokenReceivedCallback = self.config.callback
-            }
-
-            self.info("Returned from redirect url")
-            self.saveTokenFromHash(requestInfo)
-
-            if (
-                requestInfo.requestType === RequestType.RENEW_TOKEN &&
-                window.parent
-            ) {
-                if (window.parent !== window) {
-                    self.verbose(
-                        "Window is in iframe, acquiring token silently",
-                    )
-                } else {
-                    self.verbose("acquiring token interactive in progress")
-                }
-
-                token =
-                    requestInfo.parameters[ACCESS_TOKEN] ||
-                    requestInfo.parameters[ID_TOKEN]
-                tokenType = ACCESS_TOKEN
-            } else if (requestInfo.requestType === RequestType.LOGIN) {
-                token = requestInfo.parameters[ID_TOKEN]
-                tokenType = ID_TOKEN
-            }
-
-            var errorDesc = requestInfo.parameters[ERROR_DESCRIPTION]
-            var error = requestInfo.parameters[ERROR]
-            try {
-                if (tokenReceivedCallback) {
-                    tokenReceivedCallback(errorDesc, token, error, tokenType)
-                }
-            } catch (err) {
-                self.error(
-                    "Error occurred in user defined callback function: " + err,
-                )
-            }
-
-            if (window.parent === window && !isPopup) {
-                if (self.config.navigateToLoginRequestUrl) {
-                    window.location.href = self._getItem(
-                        StorageKey.LOGIN_REQUEST,
-                    )
-                } else window.location.hash = ""
-            }
-        }
-    }
-
-    /**
-     * Constructs the authorization endpoint URL and returns it.
-     * @ignore
-     */
-    _getNavigateUrl(responseType: string, resource?: string | null) {
-        var tenant = "common"
-        if (this.config.tenant) {
-            tenant = this.config.tenant
-        }
-
-        var urlNavigate =
-            this.config.instance +
-            tenant +
-            "/oauth2/authorize" +
-            this._serialize(responseType, this.config, resource) +
-            this._addLibMetadata()
-        this.info("Navigate url:" + urlNavigate)
-        return urlNavigate
-    }
-
-    /**
-     * Returns the decoded id_token.
-     * @ignore
-     */
-    _extractIdToken(encodedIdToken: string) {
-        // id token will be decoded to get the username
-        var decodedToken = this._decodeJwt(encodedIdToken)
-
-        if (!decodedToken) {
-            return null
-        }
-
-        try {
-            var base64IdToken = decodedToken.JWSPayload
-            var base64Decoded = this._base64DecodeStringUrlSafe(base64IdToken)
-
-            if (!base64Decoded) {
-                this.info(
-                    "The returned id_token could not be base64 url safe decoded.",
-                )
-                return null
-            }
-
-            // ECMA script has JSON built-in support
-            return JSON.parse(base64Decoded)
-        } catch (err) {
-            this.error("The returned id_token could not be decoded", err)
-        }
-
-        return null
-    }
-
-    /**
-     * Decodes a string of data which has been encoded using base-64 encoding.
-     * @ignore
-     */
-    _base64DecodeStringUrlSafe(base64IdToken: string) {
-        // html5 should support atob function for decoding
-        base64IdToken = base64IdToken.replace(/-/g, "+").replace(/_/g, "/")
-
-        if (window.atob) {
-            return decodeURIComponent(escape(window.atob(base64IdToken))) // jshint ignore:line
-        } else {
-            return decodeURIComponent(escape(this._decode(base64IdToken)))
-        }
-    }
-
-    //Take https://cdnjs.cloudflare.com/ajax/libs/Base64/0.3.0/base64.js and https://en.wikipedia.org/wiki/Base64 as reference.
-    _decode(base64IdToken: string) {
-        var codes =
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
-        base64IdToken = String(base64IdToken).replace(/=+$/, "")
-
-        var length = base64IdToken.length
-
-        if (length % 4 === 1) {
-            throw new Error("The token to be decoded is not correctly encoded.")
-        }
-
-        var h1,
-            h2,
-            h3,
-            h4,
-            bits,
-            c1,
-            c2,
-            c3,
-            decoded = ""
-
-        for (var i = 0; i < length; i += 4) {
-            //Every 4 base64 encoded character will be converted to 3 byte string, which is 24 bits
-            // then 6 bits per base64 encoded character
-            h1 = codes.indexOf(base64IdToken.charAt(i))
-            h2 = codes.indexOf(base64IdToken.charAt(i + 1))
-            h3 = codes.indexOf(base64IdToken.charAt(i + 2))
-            h4 = codes.indexOf(base64IdToken.charAt(i + 3))
-
-            // For padding, if last two are '='
-            if (i + 2 === length - 1) {
-                bits = (h1 << 18) | (h2 << 12) | (h3 << 6)
-                c1 = (bits >> 16) & 255
-                c2 = (bits >> 8) & 255
-                decoded += String.fromCharCode(c1, c2)
-                break
-            }
-            // if last one is '='
-            else if (i + 1 === length - 1) {
-                bits = (h1 << 18) | (h2 << 12)
-                c1 = (bits >> 16) & 255
-                decoded += String.fromCharCode(c1)
-                break
-            }
-
-            bits = (h1 << 18) | (h2 << 12) | (h3 << 6) | h4
-
-            // then convert to 3 byte chars
-            c1 = (bits >> 16) & 255
-            c2 = (bits >> 8) & 255
-            c3 = bits & 255
-
-            decoded += String.fromCharCode(c1, c2, c3)
-        }
-
-        return decoded
-    }
-
-    /**
-     * Decodes an id token into an object with header, payload and signature fields.
-     * @ignore
-     */
-    // Adal.node js crack function
-    _decodeJwt(jwtToken: string) {
-        if (this._isEmpty(jwtToken)) {
-            return null
-        }
-
-        var idTokenPartsRegex = /^([^\.\s]*)\.([^\.\s]+)\.([^\.\s]*)$/
-
-        var matches = idTokenPartsRegex.exec(jwtToken)
-
-        if (!matches || matches.length < 4) {
-            this.warn("The returned id_token is not parseable.")
-            return null
-        }
-
-        var crackedToken = {
-            header: matches[1],
-            JWSPayload: matches[2],
-            JWSSig: matches[3],
-        }
-
-        return crackedToken
-    }
-
-    /**
-     * Converts string to represent binary data in ASCII string format by translating it into a radix-64 representation and returns it
-     * @ignore
-     */
-    _convertUrlSafeToRegularBase64EncodedString(str: string) {
-        return str.replace("-", "+").replace("_", "/")
-    }
-
-    /**
-     * Serializes the parameters for the authorization endpoint URL and returns the serialized uri string.
-     * @ignore
-     */
-    _serialize(responseType: string, obj: any, resource?: string) {
-        var str: string[] = []
-
-        if (obj !== null) {
-            str.push("?response_type=" + responseType)
-            str.push("client_id=" + encodeURIComponent(obj.clientId))
-            if (resource) {
-                str.push("resource=" + encodeURIComponent(resource))
-            }
-
-            str.push("redirect_uri=" + encodeURIComponent(obj.redirectUri))
-            str.push("state=" + encodeURIComponent(obj.state))
-
-            if (obj.hasOwnProperty("slice")) {
-                str.push("slice=" + encodeURIComponent(obj.slice))
-            }
-
-            if (obj.hasOwnProperty("extraQueryParameter")) {
-                str.push(obj.extraQueryParameter)
-            }
-
-            var correlationId = obj.correlationId
-                ? obj.correlationId
-                : this._guid()
-            str.push("client-request-id=" + encodeURIComponent(correlationId))
-        }
-
-        return str.join("&")
-    }
-
-    /**
-     * Parses the query string parameters into a key-value pair object.
-     * @ignore
-     */
-    _deserialize(query: string) {
-        var match,
-            pl = /\+/g, // Regex for replacing addition symbol with a space
-            search = /([^&=]+)=([^&]*)/g,
-            decode = function (s) {
-                return decodeURIComponent(s.replace(pl, " "))
-            },
-            obj = {}
-        match = search.exec(query)
-
-        while (match) {
-            obj[decode(match[1])] = decode(match[2])
-            match = search.exec(query)
-        }
-
-        return obj
-    }
-
-    /**
-     * Converts decimal value to hex equivalent
-     * @ignore
-     */
-    _decimalToHex(number: number) {
-        var hex = number.toString(16)
-
-        while (hex.length < 2) {
-            hex = "0" + hex
-        }
-        return hex
-    }
-
-    /**
-     * Generates RFC4122 version 4 guid (128 bits)
-     * @ignore
-     */
-    _guid() {
-        // RFC4122: The version 4 UUID is meant for generating UUIDs from truly-random or
-        // pseudo-random numbers.
-        // The algorithm is as follows:
-        //     Set the two most significant bits (bits 6 and 7) of the
-        //        clock_seq_hi_and_reserved to zero and one, respectively.
-        //     Set the four most significant bits (bits 12 through 15) of the
-        //        time_hi_and_version field to the 4-bit version number from
-        //        Section 4.1.3. Version4
-        //     Set all the other bits to randomly (or pseudo-randomly) chosen
-        //     values.
-        // UUID                   = time-low "-" time-mid "-"time-high-and-version "-"clock-seq-reserved and low(2hexOctet)"-" node
-        // time-low               = 4hexOctet
-        // time-mid               = 2hexOctet
-        // time-high-and-version  = 2hexOctet
-        // clock-seq-and-reserved = hexOctet:
-        // clock-seq-low          = hexOctet
-        // node                   = 6hexOctet
-        // Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-        // y could be 1000, 1001, 1010, 1011 since most significant two bits needs to be 10
-        // y values are 8, 9, A, B
-        // @ts-expect-error
-        var cryptoObj = window.crypto || window.msCrypto // for IE 11
-        if (cryptoObj && cryptoObj.getRandomValues) {
-            var buffer = new Uint8Array(16)
-            cryptoObj.getRandomValues(buffer)
-            //buffer[6] and buffer[7] represents the time_hi_and_version field. We will set the four most significant bits (4 through 7) of buffer[6] to represent decimal number 4 (UUID version number).
-            buffer[6] |= 0x40 //buffer[6] | 01000000 will set the 6 bit to 1.
-            buffer[6] &= 0x4f //buffer[6] & 01001111 will set the 4, 5, and 7 bit to 0 such that bits 4-7 == 0100 = "4".
-            //buffer[8] represents the clock_seq_hi_and_reserved field. We will set the two most significant bits (6 and 7) of the clock_seq_hi_and_reserved to zero and one, respectively.
-            buffer[8] |= 0x80 //buffer[8] | 10000000 will set the 7 bit to 1.
-            buffer[8] &= 0xbf //buffer[8] & 10111111 will set the 6 bit to 0.
-            return (
-                this._decimalToHex(buffer[0]) +
-                this._decimalToHex(buffer[1]) +
-                this._decimalToHex(buffer[2]) +
-                this._decimalToHex(buffer[3]) +
-                "-" +
-                this._decimalToHex(buffer[4]) +
-                this._decimalToHex(buffer[5]) +
-                "-" +
-                this._decimalToHex(buffer[6]) +
-                this._decimalToHex(buffer[7]) +
-                "-" +
-                this._decimalToHex(buffer[8]) +
-                this._decimalToHex(buffer[9]) +
-                "-" +
-                this._decimalToHex(buffer[10]) +
-                this._decimalToHex(buffer[11]) +
-                this._decimalToHex(buffer[12]) +
-                this._decimalToHex(buffer[13]) +
-                this._decimalToHex(buffer[14]) +
-                this._decimalToHex(buffer[15])
-            )
-        } else {
-            var guidHolder = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
-            var hex = "0123456789abcdef"
-            var r = 0
-            var guidResponse = ""
-            for (var i = 0; i < 36; i++) {
-                if (guidHolder[i] !== "-" && guidHolder[i] !== "4") {
-                    // each x and y needs to be random
-                    r = (Math.random() * 16) | 0
-                }
-                if (guidHolder[i] === "x") {
-                    guidResponse += hex[r]
-                } else if (guidHolder[i] === "y") {
-                    // clock-seq-and-reserved first hex is filtered and remaining hex values are random
-                    r &= 0x3 // bit and with 0011 to set pos 2 to zero ?0??
-                    r |= 0x8 // set pos 3 to 1 as 1???
-                    guidResponse += hex[r]
-                } else {
-                    guidResponse += guidHolder[i]
-                }
-            }
-            return guidResponse
-        }
-    }
-
-    /**
-     * Calculates the expires in value in milliseconds for the acquired token
-     * @ignore
-     */
-    _expiresIn(expires: any) {
-        // if AAD did not send "expires_in" property, use default expiration of 3599 seconds, for some reason AAD sends 3599 as "expires_in" value instead of 3600
-        if (!expires) expires = 3599
-        return this._now() + parseInt(expires, 10)
-    }
-
-    _now() {
-        return Math.round(new Date().getTime() / 1000.0)
-    }
-
-    /**
-     * Adds the hidden iframe for silent token renewal
-     * @ignore
-     */
-    _addAdalFrame(iframeId: string) {
-        if (typeof iframeId === "undefined") {
-            return
-        }
-
-        this.info("Add adal frame to document:" + iframeId)
-        var adalFrame = document.getElementById(iframeId)
-
-        if (!adalFrame) {
-            if (
-                document.createElement &&
-                document.documentElement &&
-                (window["opera"] ||
-                    window.navigator.userAgent.indexOf("MSIE 5.0") === -1)
-            ) {
-                var ifr = document.createElement("iframe") as any
-                ifr.setAttribute("id", iframeId)
-                ifr.setAttribute("aria-hidden", "true")
-                ifr.style.visibility = "hidden"
-                ifr.style.position = "absolute"
-                ifr.style.width = ifr.style.height = ifr.borderWidth = "0px"
-
-                adalFrame = document
-                    .getElementsByTagName("body")[0]
-                    .appendChild(ifr)
-            } else if (document.body && document.body.insertAdjacentHTML) {
-                // @ts-ignore
-                document.body.insertAdjacentHTML(
-                    "beforeEnd",
-                    '<iframe name="' +
-                        iframeId +
-                        '" id="' +
-                        iframeId +
-                        '" style="display:none"></iframe>',
-                )
-            }
-            if (window.frames && window.frames[iframeId]) {
-                adalFrame = window.frames[iframeId]
-            }
-        }
-
-        return adalFrame
-    }
-
-    /**
-     * Saves the key-value pair in the cache
-     * @ignore
-     */
-    _saveItem(key: string, obj: any, preserve = false) {
-        if (
-            this.config &&
-            this.config.cacheLocation &&
-            this.config.cacheLocation === "localStorage"
-        ) {
-            if (!this._supportsLocalStorage()) {
-                this.info("Local storage is not supported")
-                return false
-            }
-
-            if (preserve) {
-                var value = this._getItem(key) || ""
-                localStorage.setItem(key, value + obj + CACHE_DELIMETER)
-            } else {
-                localStorage.setItem(key, obj)
-            }
-
-            return true
-        }
-
-        // Default as session storage
-        if (!this._supportsSessionStorage()) {
-            this.info("Session storage is not supported")
+const Storage: IStorage = (() => {
+    function supportsStorage(type: string) {
+        const storage = window[type]
+        if (!storage) {
             return false
         }
-
-        sessionStorage.setItem(key, obj)
+        const testKey = "__test__"
+        storage.setItem(testKey, testKey)
+        if (storage.getItem(testKey) !== testKey) {
+            return false
+        }
+        storage.removeItem(testKey)
+        if (storage.getItem(testKey)) {
+            return false
+        }
         return true
     }
 
-    /**
-     * Searches the value for the given key in the cache
-     * @ignore
-     */
-    _getItem(key: string): any {
-        if (
-            this.config &&
-            this.config.cacheLocation &&
-            this.config.cacheLocation === "localStorage"
-        ) {
-            if (!this._supportsLocalStorage()) {
-                this.info("Local storage is not supported")
-                return null
-            }
+    if (supportsStorage("localStorage")) return localStorage
+    if (supportsStorage("sessionStorage")) return sessionStorage
+    return {getItem() {}, setItem() {}} as IStorage
+})()
 
-            return localStorage.getItem(key)
-        }
+export enum LogLevel {
+    Error = 0,
+    Warn,
+    Info,
+    Verbose,
+}
 
-        // Default as session storage
-        if (!this._supportsSessionStorage()) {
-            this.info("Session storage is not supported")
-            return null
-        }
+const LOG_LEVEL_LABELS = {
+    [LogLevel.Error]: "ERROR",
+    [LogLevel.Warn]: "WARNING",
+    [LogLevel.Info]: "INFO",
+    [LogLevel.Verbose]: "VERBOSE",
+}
 
-        return sessionStorage.getItem(key)
-    }
-
-    /**
-     * Returns true if browser supports localStorage, false otherwise.
-     * @ignore
-     */
-    _supportsLocalStorage() {
-        try {
-            if (!window.localStorage) return false // Test availability
-            window.localStorage.setItem("storageTest", "A") // Try write
-            if (window.localStorage.getItem("storageTest") != "A") return false // Test read/write
-            window.localStorage.removeItem("storageTest") // Try delete
-            if (window.localStorage.getItem("storageTest")) return false // Test delete
-            return true // Success
-        } catch (e) {
-            return false
-        }
-    }
-
-    /**
-     * Returns true if browser supports sessionStorage, false otherwise.
-     * @ignore
-     */
-    _supportsSessionStorage() {
-        try {
-            if (!window.sessionStorage) return false // Test availability
-            window.sessionStorage.setItem("storageTest", "A") // Try write
-            if (window.sessionStorage.getItem("storageTest") != "A")
-                return false // Test read/write
-            window.sessionStorage.removeItem("storageTest") // Try delete
-            if (window.sessionStorage.getItem("storageTest")) return false // Test delete
-            return true // Success
-        } catch (e) {
-            return false
-        }
-    }
-
-    /**
-     * Returns a cloned copy of the passed object.
-     * @ignore
-     */
-    _cloneConfig(obj: any) {
-        if (null === obj || "object" !== typeof obj) {
-            return obj
-        }
-
-        var copy = {}
-        for (var attr in obj) {
-            if (obj.hasOwnProperty(attr)) {
-                copy[attr] = obj[attr]
-            }
-        }
-        return copy
-    }
-
-    /**
-     * Adds the library version and returns it.
-     * @ignore
-     */
-    _addLibMetadata() {
-        return "&x-client-SKU=Js&x-client-Ver=" + this._libVersion()
-    }
+const Logger = {
+    pii: false,
+    correlationId: undefined,
+    level: LogLevel.Error,
 
     /**
      * Checks the Logging Level, constructs the Log message and logs it. Users need to implement/override this method to turn on Logging.
@@ -2050,53 +1666,38 @@ export class Adal {
     log(
         level: LogLevel,
         message: string,
-        error: Error | string | null,
+        error: Error | string | undefined | null,
         containsPii = false,
     ) {
-        if (!this.piiLoggingEnabled && containsPii) return
+        if (containsPii && !this.pii) return
 
-        // @ts-ignore
-        if (level <= Adal.logLevel) {
-            var timestamp = new Date().toUTCString()
-            var formattedMessage = ""
-
-            if (this.config.correlationId)
-                formattedMessage =
-                    timestamp +
-                    ":" +
-                    this.config.correlationId +
-                    "-" +
-                    this._libVersion() +
-                    "-" +
-                    LOG_LEVEL_LABELS[level] +
-                    " " +
-                    message
-            else
-                formattedMessage =
-                    timestamp +
-                    ":" +
-                    this._libVersion() +
-                    "-" +
-                    LOG_LEVEL_LABELS[level] +
-                    " " +
-                    message
+        if (level <= this.level) {
+            let timestamp = new Date().toUTCString()
+            let formattedMessage =
+                timestamp +
+                ":" +
+                (this.correlationId ? this.correlationId + "-" : "") +
+                LOG_LEVEL_LABELS[level] +
+                ": " +
+                message
 
             if (error) {
-                formattedMessage += "\nstack:\n" + (error as Error).stack
+                // @ts-expect-error
+                formattedMessage += "\nstack:\n" + error.stack
             }
 
             console.log(formattedMessage)
         }
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 0.
      * @param {string} message  -  Message to log.
      * @param {string} error  -  Error to log.
      */
-    error(message: string, error: Error) {
+    error(message: string, error?: Error) {
         this.log(LogLevel.Error, message, error)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 1.
@@ -2104,7 +1705,7 @@ export class Adal {
      */
     warn(message: string) {
         this.log(LogLevel.Warn, message, null)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 2.
@@ -2112,7 +1713,7 @@ export class Adal {
      */
     info(message: string) {
         this.log(LogLevel.Info, message, null)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 3.
@@ -2120,7 +1721,7 @@ export class Adal {
      */
     verbose(message: string) {
         this.log(LogLevel.Verbose, message, null)
-    }
+    },
 
     /**
      * Logs Pii messages when Logging Level is set to 0 and window.piiLoggingEnabled is set to true.
@@ -2129,7 +1730,7 @@ export class Adal {
      */
     errorPii(message: string, error: string) {
         this.log(LogLevel.Error, message, error, true)
-    }
+    },
 
     /**
      * Logs  Pii messages when Logging Level is set to 1 and window.piiLoggingEnabled is set to true.
@@ -2137,7 +1738,7 @@ export class Adal {
      */
     warnPii(message: string) {
         this.log(LogLevel.Warn, message, null, true)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 2 and window.piiLoggingEnabled is set to true.
@@ -2145,7 +1746,7 @@ export class Adal {
      */
     infoPii(message: string) {
         this.log(LogLevel.Info, message, null, true)
-    }
+    },
 
     /**
      * Logs messages when Logging Level is set to 3 and window.piiLoggingEnabled is set to true.
@@ -2153,13 +1754,5 @@ export class Adal {
      */
     verbosePii(message: string) {
         this.log(LogLevel.Verbose, message, null, true)
-    }
-
-    /**
-     * Returns the library version.
-     * @ignore
-     */
-    _libVersion() {
-        return VERSION
-    }
+    },
 }
